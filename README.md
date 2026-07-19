@@ -1,0 +1,2 @@
+# Sxbot
+Sportsbetting bot
