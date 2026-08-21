@@ -66,3 +66,8 @@ def labeled_targets(settings: Settings | None = None) -> list[tuple[str, str]]:
         seen.add(address)
         ordered.append((label, address))
     return ordered
+
+
+def labeled_addresses(settings: Settings | None = None) -> dict[str, str]:
+    """Lowercased address → display label (known set plus SX_SHARP_WALLETS)."""
+    return {address: label for label, address in labeled_targets(settings)}

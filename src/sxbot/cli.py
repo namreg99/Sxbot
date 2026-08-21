@@ -12,6 +12,7 @@ from sxbot.flow import Motive
 from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
 from sxbot.journal import load_jsonl, print_summary
+from sxbot.overlap import format_overlap_report, format_tag
 from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
 from sxbot.scoreboard import format_scoreboard, grade_flow
 from sxbot.strategy import evaluate
@@ -68,6 +69,10 @@ def main(argv: list[str] | None = None) -> int:
         "profiles",
         help="Print strategy profiles from sxbot-history.sqlite (run archive first)",
     )
+    sub.add_parser(
+        "overlap",
+        help="V2 only: did labeled makers/takers sit on the same side our classifier flagged?",
+    )
     mimic = sub.add_parser(
         "mimic",
         help="Paper-trade new fills from labeled wallets (V2 only; skips longshots)",
@@ -87,6 +92,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "profiles":
         return cmd_profiles(settings)
+    if args.cmd == "overlap":
+        print(format_overlap_report(load_jsonl(settings.flow_log)))
+        return 0
     _warn_if_v3_mainnet_not_live(settings)
     with SxClient(settings.api_base, settings.api_key, user_agent=settings.user_agent) as client:
         try:
@@ -134,8 +142,9 @@ def _warn_if_v3_mainnet_not_live(settings: Settings) -> None:
         print(
             f"V3 mainnet books are gated until {V3_MAINNET_LIVE_AT.isoformat()} "
             "(10:00 AM EST Aug 25). Using live V2 order books on the same "
-            "flow classifier; maker addresses are ignored. After cutover this "
-            "keeps running against V3 snapshots with no strategy change.",
+            "flow classifier. Maker addresses tag overlap (who was quoting) "
+            "until cutover; they are not used to place orders. After cutover "
+            "this keeps running against V3 snapshots with no strategy change.",
             file=sys.stderr,
         )
 
@@ -372,6 +381,7 @@ def _poll_flow(bot: Bot, *, once: bool, signals_only: bool) -> int:
                         f"  SIGNAL {signal.action.value:11} {signal.side.value:12} "
                         f"conf={signal.confidence:.2f}  {signal.reason}"
                     )
+                    print(f"  {format_tag(bot.overlap_tag(market, report))}")
                 continue
             side = report.side.value if report.side else "-"
             print(describe_book(market, view))
@@ -381,6 +391,7 @@ def _poll_flow(bot: Bot, *, once: bool, signals_only: bool) -> int:
                 f"persist={report.persistence:.2f} tape={report.tape_prints}  "
                 f"{'; '.join(report.reasons)}"
             )
+            print(f"  {format_tag(bot.overlap_tag(market, report))}")
         n += 1
         if rounds is not None and n >= rounds:
             return 0

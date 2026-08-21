@@ -15,10 +15,13 @@ from sxbot.executor import Executor
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
 from sxbot.models import Book, Market, PublicTrade, Side
 from sxbot.orderbook import BookView, analyze, format_view
+from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
 from sxbot.risk import RiskGate
 from sxbot.rollout import uses_v2_books
 from sxbot.strategy import evaluate
 from sxbot.units import OddsLadder, to_percent
+from sxbot.v2 import books_from_v2_orders, public_trades_from_v2
+from sxbot.wallets import labeled_addresses
 
 log = logging.getLogger("sxbot")
 
@@ -37,6 +40,9 @@ class Bot:
         self._tape_primed = False
         self._last_heartbeat = 0.0
         self.book_source = "v2" if uses_v2_books(settings.api_base, book_source=settings.book_source) else "v3"
+        self._labeled = labeled_addresses(settings)
+        self._quotes_by_market: dict[str, MarketQuotes] = {}
+        self._takers_by_market: dict[str, dict[str, tuple[str, ...]]] = {}
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
         now = int(time.time())
@@ -92,10 +98,13 @@ class Bot:
         hashes = [market.market_hash for market in markets]
         poll_version = str(int(time.time() * 1000))
         try:
-            books = self.client.v2_books(hashes)
+            orders = self.client.v2_orders(hashes)
         except Exception as exc:
             log.warning("v2 book fetch failed: %s", exc)
+            self._quotes_by_market = {}
             return []
+        self._quotes_by_market = attribute_quotes(orders, self._labeled)
+        books = books_from_v2_orders(orders, version=poll_version, market_hashes=hashes)
         rows: list[tuple[Market, BookView]] = []
         for market in markets:
             raw = books.get(market.market_hash) or Book(market.market_hash, "empty", (), ())
@@ -108,8 +117,11 @@ class Bot:
         try:
             if self.book_source == "v2":
                 hashes = [m.market_hash for m in (markets or [])]
-                tape = self.client.v2_trades(hashes) if hashes else []
+                raw_trades = self.client.v2_trade_rows(hashes) if hashes else []
+                self._takers_by_market = attribute_tape(raw_trades, self._labeled)
+                tape = public_trades_from_v2(raw_trades)
             else:
+                self._takers_by_market = {}
                 tape = self.client.public_trades(per_page=50)
         except Exception as exc:
             log.debug("public tape failed: %s", exc)
@@ -150,6 +162,13 @@ class Bot:
         report = classify(prev, view, self.settings, trades=trades, steam_hits=hits)
         self._log_flow(market, view, report)
         return prev, report
+
+    def overlap_tag(self, market: Market, report: FlowReport) -> dict:
+        market_key = market.market_hash.lower()
+        quotes = self._quotes_by_market.get(market_key)
+        side = report.side.value if report.side else None
+        takers = (self._takers_by_market.get(market_key) or {}).get(side or "", ())
+        return tag_signal(quotes, side=side, takers=takers)
 
     def step(self) -> int:
         self._maybe_heartbeat()
@@ -225,6 +244,7 @@ class Bot:
             # not naive win rate (which just rewards picking favorites).
             "mid_pct": to_percent(view.mid_one) if view.mid_one is not None else None,
         }
+        record.update(self.overlap_tag(market, report))
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")

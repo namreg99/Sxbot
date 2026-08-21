@@ -69,6 +69,7 @@ sxbot scoreboard      # grade the SIGNAL itself vs. the price already in the boo
 sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
 sxbot archive         # pull winter + summer fill history into SQLite
 sxbot profiles        # sport / odds / live-vs-pregame style report
+sxbot overlap         # V2 only: who was quoting when our classifier fired?
 sxbot mimic           # paper-copy new fills from those wallets (V2 only)
 ```
 
@@ -140,6 +141,8 @@ See `.env.example`. The knobs that matter:
 Known profitable addresses are useful until **August 25**, then they vanish from the public API. Four wallets are already paired from unique fills (GambleGuruGary, cypherprod, BotswanaMC, HedgeHog). `sxbot archive` pulls the biggest V2 sample the API will give us across **winter (Dec/Jan NFL/NBA/NHL)** and **summer (soccer, baseball, tennis)** windows — not one endless scrape from December 1, which never reaches January because Gary prints hundreds of fills a day.
 
 `sxbot profiles` turns that SQLite into a style card: maker vs taker, sport mix (tennis included), live vs pregame, odds buckets (the ≤1.12 hammer vs 7.84 lottery tickets), scale-in, and **net** P&L vs the gross “Won” leaderboard. `sxbot mimic` paper-copies **new** taker fills at `SX_STAKE_USDC` (and HedgeHog-style resting quotes) while V2 still attributes them. It does not dump history into the paper log; the first poll only primes seen fill ids. Longshots above `SX_MIMIC_MAX_DECIMAL` (3.5) are skipped.
+
+`sxbot overlap` is the last labeled check before cutover: each flow signal is tagged with which of the four wallets were *resting* on the flagged side (`quoted_by`) and which *took* it on the same poll (`takers`). Leave `sxbot flow` or `sxbot run` going on V2, then `sxbot overlap`. After August 25 that column is gone; keep the jsonl and grade it against SX outcomes.
 
 After V3, drop mimic. Keep `SX_FOLLOW_STYLE=take` for a Gary-like soccer/tennis steam taker, `join` for a HedgeHog-like MM, and do not mix them.
 

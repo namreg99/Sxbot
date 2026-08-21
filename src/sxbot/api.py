@@ -162,13 +162,14 @@ class SxClient:
                 page += 1
         return out
 
-    def v2_trades(
+    def v2_trade_rows(
         self,
         market_hashes: list[str],
         *,
         per_page: int = 50,
         batch_size: int = 12,
-    ) -> list[PublicTrade]:
+    ) -> list[dict[str, Any]]:
+        """Raw V2 fills (still have bettor/maker fields). Empty if no hashes."""
         if not market_hashes:
             return []
         rows: list[dict[str, Any]] = []
@@ -182,7 +183,18 @@ class SxClient:
                 rows.extend(data.get("trades") or [])
             elif isinstance(data, list):
                 rows.extend(data)
-        return public_trades_from_v2(rows)
+        return rows
+
+    def v2_trades(
+        self,
+        market_hashes: list[str],
+        *,
+        per_page: int = 50,
+        batch_size: int = 12,
+    ) -> list[PublicTrade]:
+        return public_trades_from_v2(
+            self.v2_trade_rows(market_hashes, per_page=per_page, batch_size=batch_size)
+        )
 
     def v2_books(self, market_hashes: list[str], *, version: str | None = None) -> dict[str, Book]:
         orders = self.v2_orders(market_hashes) if market_hashes else []
