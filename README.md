@@ -19,7 +19,7 @@ Every couple of seconds the bot looks at the live prices and asks:
 
 In **paper mode** (the default) it writes "I would have bet $5 on X at 49%" to a file. It does **not** send an order and it does **not** spend money. Real orders only happen if you later turn dry-run off and add keys.
 
-**We cannot backtest last season.** SX does not keep old order books, so there is nothing to rewind. What we *can* do is leave paper mode running, then after games finish run `sxbot grade`. That scores those paper quotes *if they had been filled*. Joining as a maker often does not fill, so graded P&L is the optimistic case.
+**We cannot backtest last season.** SX does not keep old order books, so there is nothing to rewind. What we *can* do is leave paper mode running, then after SX *reports* the market run `sxbot grade`. A TV/scoreboard final is not the same as an SX `outcome` — totals often report first; moneylines and spreads can stay pending for hours. That scores those paper quotes *if they had been filled*. Joining as a maker often does not fill, so graded P&L is the optimistic case.
 
 ## How it works
 
@@ -64,7 +64,7 @@ sxbot flow            # classify steam / rotation / lag / taker / crossed
 sxbot radar           # sweep ~30s, print ranked "where is the money right now" (read it, bet yourself)
 sxbot run             # paper-trade loop (writes jsonl)
 sxbot summary         # what has been recorded so far
-sxbot grade           # after games finish: did those paper quotes win?
+sxbot grade           # after SX reports the outcome (TV final is not enough)
 sxbot scoreboard      # grade the SIGNAL itself vs. the price already in the book
 sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
 sxbot archive         # pull winter + summer fill history into SQLite

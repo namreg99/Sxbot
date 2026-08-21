@@ -22,10 +22,13 @@ There is no shortcut — this is evidence, not a guess.
 
 from __future__ import annotations
 
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+
+from sxbot.api import lookup_market
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,15 @@ def _result_for(side: str, outcome: int | None) -> str:
     return "win" if won else "lose"
 
 
+def _as_outcome(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def grade_flow_row(row: dict[str, Any], market: dict[str, Any] | None) -> GradedFlow:
     side = str(row.get("side") or "")
     mid_pct = row.get("mid_pct")
@@ -93,8 +105,7 @@ def grade_flow_row(row: dict[str, Any], market: dict[str, Any] | None) -> Graded
             result="missing",
             edge=None,
         )
-    outcome = market.get("outcome")
-    outcome = int(outcome) if outcome is not None else None
+    outcome = _as_outcome(market.get("outcome"))
     result = _result_for(side, outcome)
     edge: float | None = None
     implied = _side_implied_prob(side, mid_pct)
@@ -119,7 +130,7 @@ def grade_flow(rows: list[dict[str, Any]], markets: dict[str, dict[str, Any]]) -
     out: list[GradedFlow] = []
     for row in rows:
         market_hash = str(row.get("market") or "")
-        out.append(grade_flow_row(row, markets.get(market_hash)))
+        out.append(grade_flow_row(row, lookup_market(markets, market_hash)))
     return out
 
 
@@ -198,12 +209,23 @@ def format_scoreboard(bets: list[GradedFlow]) -> str:
     overall = _aggregate(bets)
     lines.append("overall")
     lines.append(_fmt_row("all motives", overall, width=14))
-    pending = sum(1 for b in bets if b.result == "pending")
+    pending = [b for b in bets if b.result == "pending"]
     missing = sum(1 for b in bets if b.result == "missing")
-    if pending:
-        lines.append(f"  ({pending} still pending kickoff/result)")
+    now = int(time.time())
+    waiting_sx = sum(1 for b in pending if not (b.game_time and b.game_time > now))
+    not_started = len(pending) - waiting_sx
+    if waiting_sx:
+        lines.append(f"  ({waiting_sx} kickoff passed, SX has not reported an outcome yet)")
+    if not_started:
+        lines.append(f"  ({not_started} still waiting on kickoff)")
     if missing:
         lines.append(f"  ({missing} could not be matched to a market — find_markets miss)")
+    settled_no_edge = sum(1 for b in bets if b.result in {"win", "lose"} and b.edge is None)
+    if settled_no_edge:
+        lines.append(
+            f"  ({settled_no_edge} settled without mid_pct in the flow log — "
+            "hit rate counts, edge skipped; newer runs log mid_pct)"
+        )
     lines.append("")
 
     by_motive = aggregate_by(bets, lambda b: b.motive)

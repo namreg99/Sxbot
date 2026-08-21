@@ -4,16 +4,21 @@ This is not a historical backtest of the order book. SX does not keep old
 books, so we cannot rewind last season. What we can do is: if `sxbot run`
 logged a paper quote, look the market up later and ask "if that quote had
 been filled, did we win?"
+
+Finished on TV is not enough. SX only settles when `GET /markets/find`
+returns an `outcome` (and usually `reportedDate`). Totals often report
+before moneylines and spreads.
 """
 
 from __future__ import annotations
 
+import time
 from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from sxbot.journal import load_jsonl
+from sxbot.api import lookup_market
 from sxbot.units import payout, to_usdc
 
 
@@ -31,12 +36,36 @@ class GradedBet:
     winner: str | None
     game_time: int
     score: str | None = None
+    reported_at: int | None = None
 
 
 def _kickoff(game_time: int) -> str:
     if not game_time:
         return ""
     return datetime.fromtimestamp(game_time, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _as_outcome(raw: Any) -> int | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _waiting_note(game_time: int, *, now: int | None = None) -> str:
+    """SX outcome is missing. Distinguish not-started vs in-play/unreported."""
+    when = _kickoff(game_time) or "kickoff unknown"
+    if not game_time:
+        return when
+    now = now if now is not None else int(time.time())
+    if game_time > now:
+        return f"{when}  (not started)"
+    elapsed = now - game_time
+    if elapsed < 3600:
+        return f"{when}  (started {elapsed // 60}m ago; SX not reported yet)"
+    return f"{when}  (started {elapsed // 3600}h ago; SX not reported yet)"
 
 
 def _result_for(side: str, outcome: int | None) -> str:
@@ -75,8 +104,7 @@ def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: i
             winner=None,
             game_time=game_time,
         )
-    raw = market.get("outcome")
-    outcome = int(raw) if raw is not None else None
+    outcome = _as_outcome(market.get("outcome"))
     winner = None
     if outcome == 1:
         winner = str(market.get("outcomeOneName") or "outcome one")
@@ -95,6 +123,8 @@ def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: i
     score = None
     if market.get("teamOneScore") is not None and market.get("teamTwoScore") is not None:
         score = f"{market.get('teamOneScore')}-{market.get('teamTwoScore')}"
+    reported_raw = market.get("reportedDate")
+    reported_at = int(reported_raw) if reported_raw not in (None, "") else None
     return GradedBet(
         label=label or f"{market.get('outcomeOneName')} / {market.get('outcomeTwoName')}",
         league=league or str(market.get("leagueLabel") or ""),
@@ -108,6 +138,7 @@ def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: i
         winner=winner,
         game_time=game_time,
         score=score,
+        reported_at=reported_at,
     )
 
 
@@ -120,11 +151,11 @@ def grade_paper(
     out: list[GradedBet] = []
     for row in rows:
         market_hash = str(row.get("market") or "")
-        out.append(grade_row(row, markets.get(market_hash), decimals=decimals))
+        out.append(grade_row(row, lookup_market(markets, market_hash), decimals=decimals))
     return out
 
 
-def format_grade(bets: list[GradedBet]) -> str:
+def format_grade(bets: list[GradedBet], *, now: int | None = None) -> str:
     lines: list[str] = []
     if not bets:
         lines.append("No paper bets in the log yet. Leave `sxbot run` going first.")
@@ -136,7 +167,11 @@ def format_grade(bets: list[GradedBet]) -> str:
     staked = sum(b.stake_usdc for b in settled)
     lines.append(
         "This is NOT a rewind of old order books. SX does not keep those. "
-        "This scores paper quotes *after the game is reported*, assuming each quote got filled."
+        "This scores paper quotes *after SX reports the outcome*, assuming each quote got filled."
+    )
+    lines.append(
+        "A TV final is not enough — `sxbot grade` waits for SX `outcome`/`reportedDate`. "
+        "Totals often report before moneylines and spreads."
     )
     lines.append("Joining as a maker often does not fill — real results will usually be smaller.")
     lines.append("")
@@ -147,24 +182,49 @@ def format_grade(bets: list[GradedBet]) -> str:
     lines.append(f"  void           {counts.get('void', 0)}")
     if counts.get("missing"):
         lines.append(f"  not found      {counts['missing']}")
+    stacked = sum(
+        n - 1
+        for n in Counter((b.label, b.side) for b in bets if b.action == "join_maker").values()
+        if n > 1
+    )
+    if stacked:
+        lines.append(
+            f"  stacked joins  {stacked} extra join_maker quote(s) on a side already joined "
+            "(size flicker used to restack; new runs skip that)"
+        )
     if settled:
         lines.append(f"settled stake    {staked:.1f} USDC")
         lines.append(f"paper P&L        {pnl:+.2f} USDC   (if every quote filled)")
     else:
-        lines.append("No games in this log have been reported yet. Run `sxbot grade` again after they finish.")
+        lines.append(
+            "No games in this log have an SX-reported outcome yet. "
+            "Run `sxbot grade` again after find_markets shows `outcome` 1 or 2."
+        )
 
     pending = [b for b in bets if b.result == "pending"]
     if pending:
+        now = now if now is not None else int(time.time())
+        not_started = [b for b in pending if b.game_time and b.game_time > now]
+        waiting_sx = [b for b in pending if not (b.game_time and b.game_time > now)]
         lines.append("")
-        lines.append("waiting on")
-        seen: set[str] = set()
-        for bet in pending:
-            key = f"{bet.label}|{bet.game_time}"
-            if key in seen:
-                continue
-            seen.add(key)
-            when = _kickoff(bet.game_time) or "kickoff unknown"
-            lines.append(f"  {bet.league:<16} {bet.label[:40]:<40}  {when}")
+        if waiting_sx:
+            lines.append("waiting on SX report (kickoff already passed)")
+            seen: set[str] = set()
+            for bet in waiting_sx:
+                key = f"{bet.label}|{bet.game_time}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                lines.append(f"  {bet.league:<16} {bet.label[:40]:<40}  {_waiting_note(bet.game_time, now=now)}")
+        if not_started:
+            lines.append("waiting on kickoff")
+            seen = set()
+            for bet in not_started:
+                key = f"{bet.label}|{bet.game_time}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                lines.append(f"  {bet.league:<16} {bet.label[:40]:<40}  {_kickoff(bet.game_time)}")
 
     if settled:
         lines.append("")

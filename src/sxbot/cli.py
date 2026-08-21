@@ -5,7 +5,7 @@ import logging
 import sys
 import time
 
-from sxbot.api import SxApiError, SxClient
+from sxbot.api import SxApiError, SxClient, index_markets
 from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
 from sxbot.flow import Motive
@@ -211,7 +211,7 @@ def cmd_grade(client: SxClient, settings: Settings) -> int:
     rows = load_jsonl(settings.paper_log)
     hashes = list(dict.fromkeys(str(row.get("market") or "") for row in rows if row.get("market")))
     found = client.find_markets(hashes) if hashes else []
-    markets = {str(row.get("marketHash") or ""): row for row in found}
+    markets = index_markets(found)
     print(format_grade(grade_paper(rows, markets, decimals=6)))
     return 0
 
@@ -239,7 +239,7 @@ def cmd_sharp(client: SxClient, settings: Settings) -> int:
         )
         hashes = [h for h in hashes if h][:30]
         found = client.find_markets(hashes) if hashes else []
-        markets = {str(row.get("marketHash") or ""): row for row in found}
+        markets = index_markets(found)
         profile = profile_wallet(
             address,
             maker_fills=maker_fills,
@@ -343,7 +343,7 @@ def cmd_scoreboard(client: SxClient, settings: Settings) -> int:
     rows = load_jsonl(settings.flow_log)
     hashes = list(dict.fromkeys(str(row.get("market") or "") for row in rows if row.get("market")))
     found = client.find_markets(hashes) if hashes else []
-    markets = {str(row.get("marketHash") or ""): row for row in found}
+    markets = index_markets(found)
     print(format_scoreboard(grade_flow(rows, markets)))
     return 0
 

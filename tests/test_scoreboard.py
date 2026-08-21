@@ -93,3 +93,17 @@ def test_format_scoreboard_small_sample_caveat() -> None:
     text = format_scoreboard(bets)
     assert "hit rate alone is misleading" in text
     assert "Treat every number above as noise" in text
+
+
+def test_scoreboard_matches_mixed_case_hash() -> None:
+    bets = grade_flow([_row(market="0xABC")], {"0xabc": {"outcome": 1}})
+    assert bets[0].result == "win"
+
+
+def test_scoreboard_notes_started_but_unreported() -> None:
+    bets = grade_flow(
+        [_row(game_time=1, mid_pct=None)],
+        {"0xabc": {"outcome": None, "gameTime": 1}},
+    )
+    text = format_scoreboard(bets)
+    assert "SX has not reported" in text

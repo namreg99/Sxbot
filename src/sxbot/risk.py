@@ -13,6 +13,7 @@ class RiskGate:
         self.decimals = decimals
         self.exposure = Exposure()
         self.quoted: set[str] = set()
+        self.joined_sides: set[tuple[str, str]] = set()
 
     def stake(self) -> int:
         return to_base_units(self.settings.stake_usdc, self.decimals)
@@ -38,12 +39,18 @@ class RiskGate:
             return "max total exposure"
         if self.exposure.net(market_hash) + stake > max_mkt:
             return "max per-market exposure"
+        if signal.action is Action.JOIN_MAKER and (market_hash, signal.side.value) in self.joined_sides:
+            return "already joined this side"
         return None
 
     def record(self, signal: Signal) -> None:
+        market_hash = signal.market.market_hash
         if signal.action is Action.CANCEL:
-            self.exposure.by_market.pop(signal.market.market_hash, None)
-            self.quoted.discard(signal.market.market_hash)
+            self.exposure.by_market.pop(market_hash, None)
+            self.quoted.discard(market_hash)
+            self.joined_sides = {item for item in self.joined_sides if item[0] != market_hash}
             return
-        self.exposure.add(signal.market.market_hash, signal.side, self.stake())
-        self.quoted.add(signal.market.market_hash)
+        self.exposure.add(market_hash, signal.side, self.stake())
+        self.quoted.add(market_hash)
+        if signal.action is Action.JOIN_MAKER:
+            self.joined_sides.add((market_hash, signal.side.value))

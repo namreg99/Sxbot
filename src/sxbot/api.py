@@ -257,8 +257,7 @@ class SxClient:
         for i in range(0, len(market_hashes), 30):
             chunk = market_hashes[i : i + 30]
             data = self._get("/markets/find", params={"marketHashes": ",".join(chunk)})
-            if isinstance(data, list):
-                out.extend(row for row in data if isinstance(row, dict))
+            out.extend(as_market_rows(data))
         return out
 
     def create_orders(self, orders: list[dict[str, Any]], *, wait: bool = True) -> dict[str, Any]:
@@ -319,6 +318,48 @@ def v2_trade_query_params(
     if pagination_key:
         params["paginationKey"] = pagination_key
     return params
+
+
+def as_market_rows(data: Any) -> list[dict[str, Any]]:
+    """Unwrap GET /markets/find payloads (list, {markets: [...]}, or a single row)."""
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict) and row.get("marketHash")]
+    if isinstance(data, dict):
+        if data.get("marketHash"):
+            return [data]
+        for key in ("markets", "data"):
+            inner = data.get(key)
+            if isinstance(inner, list):
+                return as_market_rows(inner)
+            if isinstance(inner, dict):
+                return as_market_rows(inner)
+    return []
+
+
+def index_markets(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Key find_markets rows by lowercased hash so paper logs match the API."""
+    out: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        market_hash = str(row.get("marketHash") or "").lower()
+        if market_hash:
+            out[market_hash] = row
+    return out
+
+
+def lookup_market(markets: dict[str, dict[str, Any]], market_hash: str) -> dict[str, Any] | None:
+    if not market_hash:
+        return None
+    hit = markets.get(market_hash)
+    if hit is not None:
+        return hit
+    lower = market_hash.lower()
+    hit = markets.get(lower)
+    if hit is not None:
+        return hit
+    for key, row in markets.items():
+        if str(key).lower() == lower:
+            return row
+    return None
 
 
 def _as_order_rows(data: Any) -> list[dict[str, Any]]:

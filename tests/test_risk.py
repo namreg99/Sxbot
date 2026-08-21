@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from sxbot.models import Action, Side, Signal
 from sxbot.risk import RiskGate
 from sxbot.units import to_base_units
@@ -34,13 +36,22 @@ def test_blocks_max_open_markets() -> None:
     first = _signal(hash_="0x1")
     gate.record(first)
     assert gate.allow(_signal(hash_="0x2")) == "max open markets"
-    assert gate.allow(_signal(hash_="0x1")) is None
+    opposite = replace(_signal(hash_="0x1"), side=Side.OUTCOME_TWO)
+    assert gate.allow(opposite) is None
+
+
+def test_does_not_restack_the_same_join() -> None:
+    gate = RiskGate(make_settings(max_per_market_usdc=25, max_exposure_usdc=1000))
+    gate.record(_signal(hash_="0x1"))
+    assert gate.allow(_signal(hash_="0x1")) == "already joined this side"
+    opposite = replace(_signal(hash_="0x1"), side=Side.OUTCOME_TWO)
+    assert gate.allow(opposite) is None
 
 
 def test_blocks_per_market_cap() -> None:
     gate = RiskGate(make_settings(max_per_market_usdc=5, stake_usdc=5, max_exposure_usdc=1000))
-    gate.record(_signal(hash_="0x1"))
-    assert gate.allow(_signal(hash_="0x1")) == "max per-market exposure"
+    gate.record(_signal(Action.TAKE_STALE, hash_="0x1"))
+    assert gate.allow(_signal(Action.TAKE_STALE, hash_="0x1")) == "max per-market exposure"
 
 
 def test_cancel_clears_exposure() -> None:
@@ -59,7 +70,5 @@ def test_blocks_live_market_even_when_watched() -> None:
     gate = RiskGate(make_settings(allow_live=False, watch_live=True))
     signal = _signal()
     live = make_market(market_hash="0x1", game_time=1)
-    from dataclasses import replace
-
     live_signal = replace(signal, market=live)
     assert gate.allow(live_signal) == "live market disabled"
