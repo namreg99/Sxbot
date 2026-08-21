@@ -6,13 +6,14 @@ import sys
 import time
 
 from sxbot.api import SxApiError, SxClient
-from sxbot.bot import Bot, describe_book, print_scan
+from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
 from sxbot.flow import Motive
 from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
 from sxbot.journal import load_jsonl, print_summary
 from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
+from sxbot.scoreboard import format_scoreboard, grade_flow
 from sxbot.strategy import evaluate
 from sxbot.v2 import book_from_v2_orders
 
@@ -35,6 +36,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Classify sharp vs taker flow from the book (no wallets)",
     )
     flow.add_argument("--once", action="store_true")
+    radar = sub.add_parser(
+        "radar",
+        help="Sweep a window: where the book says smart money is right now (read it, bet yourself)",
+    )
+    radar.add_argument("--limit", type=int, default=25)
+    radar.add_argument("--seconds", type=float, default=30.0, help="How long to sweep before printing")
+    sub.add_parser(
+        "scoreboard",
+        help="Grade flow signals (not paper orders) against real settled outcomes",
+    )
     run = sub.add_parser("run", help="Paper or live trading loop (dry-run unless SX_DRY_RUN=false)")
     run.add_argument("--once", action="store_true", help="Two polls then exit")
     sub.add_parser("summary", help="Print recorded flow + paper-trade logs")
@@ -96,6 +107,10 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_watch(bot, once=args.once)
             if args.cmd == "flow":
                 return cmd_flow(bot, once=args.once)
+            if args.cmd == "radar":
+                return cmd_radar(bot, limit=args.limit, seconds=args.seconds)
+            if args.cmd == "scoreboard":
+                return cmd_scoreboard(client, settings)
             if args.cmd == "run":
                 if args.once:
                     # Two polls so the strategy has a previous book to compare.
@@ -315,6 +330,22 @@ def cmd_watch(bot: Bot, *, once: bool) -> int:
 def cmd_flow(bot: Bot, *, once: bool) -> int:
     print("classifying sharp flow from the book (no wallets) — no orders")
     return _poll_flow(bot, once=once, signals_only=False)
+
+
+def cmd_radar(bot: Bot, *, limit: int, seconds: float) -> int:
+    print(f"sweeping the book for {seconds:.0f}s (most markets do not reprice every poll)...")
+    rows = scan_radar_window(bot, seconds=seconds)
+    print(format_radar(rows, limit=limit))
+    return 0
+
+
+def cmd_scoreboard(client: SxClient, settings: Settings) -> int:
+    rows = load_jsonl(settings.flow_log)
+    hashes = list(dict.fromkeys(str(row.get("market") or "") for row in rows if row.get("market")))
+    found = client.find_markets(hashes) if hashes else []
+    markets = {str(row.get("marketHash") or ""): row for row in found}
+    print(format_scoreboard(grade_flow(rows, markets)))
+    return 0
 
 
 def _poll_flow(bot: Bot, *, once: bool, signals_only: bool) -> int:

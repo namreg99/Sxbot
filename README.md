@@ -61,9 +61,11 @@ cp .env.example .env
 sxbot doctor          # connectivity + which book source (V2 vs V3)
 sxbot scan            # rank live books by maker-size imbalance
 sxbot flow            # classify steam / rotation / lag / taker / crossed
+sxbot radar           # sweep ~30s, print ranked "where is the money right now" (read it, bet yourself)
 sxbot run             # paper-trade loop (writes jsonl)
 sxbot summary         # what has been recorded so far
 sxbot grade           # after games finish: did those paper quotes win?
+sxbot scoreboard      # grade the SIGNAL itself vs. the price already in the book
 sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
 sxbot archive         # pull winter + summer fill history into SQLite
 sxbot profiles        # sport / odds / live-vs-pregame style report
@@ -74,6 +76,21 @@ sxbot mimic           # paper-copy new fills from those wallets (V2 only)
 
 Mainnet: `https://api.sx.bet` (default)  
 Testnet: `https://api.toronto.sx.bet`
+
+## The tool for a human bettor, not an autobot
+
+`sxbot radar --seconds 30` is the direct answer to "where is the smart money right now": it sweeps the live book for a window (one instant rarely catches anything — most markets do not reprice every poll), then prints every market that showed a maker steam, size rotation, top-of-book lag, or a crossed/stale quote, ranked by confidence, with the reasoning spelled out and the kickoff time. Nothing gets bet automatically — you read it and decide.
+
+Confidence there is a hand-tuned heuristic, not proof. `sxbot scoreboard` is how you find out if it's real: it grades the **signal itself** — not paper orders — against real settled results. It reports two numbers per motive and per confidence bucket:
+
+- **hit rate** — how often the flagged side won. On its own this is close to useless: a signal that only ever fires on heavy favorites "hits" most of the time for free, because the price already said so.
+- **avg edge** — the actual result (1/0) minus the implied probability the book was *already quoting* for that side the moment the signal fired. This is the number that can't be faked by picking favorites. Near 0% means the signal adds nothing beyond the price that was already there; positive and durable across a real sample is the only thing that would make this a genuine "better bettor" tool.
+
+Run `sxbot run` (or just `sxbot flow`) for a while so `sxbot-flow.jsonl` accumulates, then `sxbot scoreboard` once some of those games have finished. Treat anything under ~100 settled events as noise — small samples in sports betting lie constantly, in both directions.
+
+### Is historical wallet data worth building on?
+
+Mostly no, and that skepticism is correct. `archive`/`sharp`/`mimic` read wallet-attributed V2 fills, which vanish from the public API after the V3 cutover (Aug 25) — anything built to depend on a specific address stops working that day. What those addresses *can* still tell you, while V2 lasts, is which sports/leagues/bet-types tend to have the most informed two-sided quoting (e.g. `cypherprod` above is a real, currently-profitable maker, concentrated in soccer) — that's a hint about where to point `radar`/`run`, not a wallet-copy product. The durable instrument is `flow.py` + `scoreboard`: it never depended on addresses, works identically on mainnet today (via the V2→book adapter) and on V3 after cutover, and its only real validation is the settled-outcome evidence `scoreboard` produces — not a story about named wallets.
 
 ## What you can extract before V3 — and what still helps after
 

@@ -5,6 +5,7 @@ import logging
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -147,7 +148,7 @@ class Bot:
         steam_side = steam_direction(prev, view, self.settings.min_mid_move_bps)
         hits = self.steam.record(market.market_hash, steam_side, time.time())
         report = classify(prev, view, self.settings, trades=trades, steam_hits=hits)
-        self._log_flow(market, report)
+        self._log_flow(market, view, report)
         return prev, report
 
     def step(self) -> int:
@@ -196,7 +197,7 @@ class Bot:
                 except Exception:
                     log.exception("failed to cancel on shutdown")
 
-    def _log_flow(self, market: Market, report: FlowReport) -> None:
+    def _log_flow(self, market: Market, view: BookView, report: FlowReport) -> None:
         if report.motive is Motive.NONE:
             return
         path = Path(self.settings.flow_log)
@@ -205,6 +206,7 @@ class Bot:
             "market": market.market_hash,
             "label": market.label,
             "league": market.league_label,
+            "game_time": market.game_time,
             "phase": market.phase(),
             "book_source": self.book_source,
             "live_enabled": market.live_enabled,
@@ -218,6 +220,10 @@ class Bot:
             "confidence": report.confidence,
             "reasons": list(report.reasons),
             "actionable": report.actionable,
+            # Implied probability of outcome one *at the moment the signal fired*,
+            # so scoreboard.py can grade edge vs. the price already in the book,
+            # not naive win rate (which just rewards picking favorites).
+            "mid_pct": to_percent(view.mid_one) if view.mid_one is not None else None,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
@@ -254,6 +260,91 @@ def pick_universe(
     chosen = pregame[: max(cap - live_slots, 0)]
     live_slots = cap - len(chosen)
     return chosen + live[:live_slots]
+
+
+@dataclass
+class RadarRow:
+    market: Market
+    view: BookView
+    report: FlowReport
+
+
+def scan_radar(bot: Bot) -> list[RadarRow]:
+    """One pass: classify the whole universe, return actionable rows.
+
+    A single pass rarely sees anything — most markets do not reprice inside
+    one poll interval. Prefer `scan_radar_window` for real use; this is kept
+    for callers that already run their own poll loop.
+    """
+    out: list[RadarRow] = []
+    markets = bot.qualifying_markets()
+    tape = bot.pull_tape(markets)
+    for market, view in bot.scan_many(markets):
+        prev, report = bot.classify_row(market, view, tape)
+        if prev is None or report is None or report.motive is Motive.NONE:
+            continue
+        out.append(RadarRow(market=market, view=view, report=report))
+    return out
+
+
+def scan_radar_window(bot: Bot, *, seconds: float, poll_seconds: float | None = None) -> list[RadarRow]:
+    """Poll for `seconds` and return the latest flagged row per (market, motive, side).
+
+    Book changes are sparse per market — sweeping a window instead of one
+    diff is what makes "where is the smart money right now" actually mean
+    something instead of usually coming back empty.
+    """
+    poll = max(poll_seconds or bot.settings.poll_seconds, 0.5)
+    deadline = time.time() + max(seconds, poll)
+    latest: dict[tuple[str, str, str], RadarRow] = {}
+    while True:
+        for row in scan_radar(bot):
+            side = row.report.side.value if row.report.side else "-"
+            key = (row.market.market_hash, row.report.motive.value, side)
+            latest[key] = row
+        if time.time() >= deadline:
+            break
+        time.sleep(poll)
+    return list(latest.values())
+
+
+def format_radar(rows: list[RadarRow], *, limit: int = 25) -> str:
+    if not rows:
+        return (
+            "No flow yet. Either the book is quiet right now, or this was the "
+            "first poll (the classifier needs two snapshots to see a move) — "
+            "run `sxbot radar` again in a few seconds."
+        )
+    ranked = sorted(rows, key=lambda r: r.report.confidence, reverse=True)
+    lines = [
+        "Where the book says smart money is right now (no wallets, no auto-betting).",
+        "Read this, then place the bet yourself if you agree with the reasoning.",
+        "",
+    ]
+    for row in ranked[:limit]:
+        report = row.report
+        side = report.side.value if report.side else "-"
+        label = "ACT" if report.actionable else "fyi"
+        lines.append(
+            f"[{label}] conf={report.confidence:.2f}  {row.market.phase():<8} "
+            f"{row.market.league_label:<12} {row.market.label[:40]:<40}"
+        )
+        lines.append(
+            f"       {report.motive.value:<14} side={side:<12} "
+            f"mid={to_percent(row.view.mid_one) if row.view.mid_one is not None else 'n/a'}%  "
+            f"{kickoff_iso(row.market.game_time)}"
+        )
+        if report.reasons:
+            lines.append(f"       why: {'; '.join(report.reasons)}")
+        lines.append("")
+    n_actionable = sum(1 for r in rows if r.report.actionable)
+    lines.append(f"{n_actionable} actionable / {len(rows)} flagged this pass.")
+    lines.append(
+        "Confidence here is a hand-tuned heuristic, not a proven edge — run "
+        "`sxbot run` for a while and then `sxbot scoreboard` to check whether "
+        "these motives actually beat the price that was already in the book."
+    )
+    return "\n".join(lines)
 
 
 def print_scan(rows: list[tuple[Market, BookView]], limit: int = 40) -> None:
