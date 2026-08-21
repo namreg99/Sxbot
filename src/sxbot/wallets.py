@@ -50,8 +50,8 @@ CANDIDATE_WALLETS: dict[str, str] = {
 # BotswanaMC was paired from a single unique fill. Treat as medium confidence.
 WALLET_NOTES: dict[str, str] = {
     "BotswanaMC": "medium-confidence pair (one unique Chargers/49ers fill)",
-    "TennisMix": "research-only; 5-day tennis-heavy mixed book, not a mimic target",
-    "SoccerTaker": "research-only; 5-day soccer pregame taker heater, not a mimic target",
+    "TennisMix": "research-only; winter+summer tennis −EV; 5-day heater is not the sample",
+    "SoccerTaker": "research-only; no fills before 2026-07-23; $1k-stake month-old heater",
 }
 
 
