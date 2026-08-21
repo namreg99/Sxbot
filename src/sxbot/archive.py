@@ -255,6 +255,9 @@ class HistoryStore:
             ).fetchone()
         return int(row["n"] if row else 0)
 
+    def fill_count(self) -> int:
+        return int(self._db.execute("SELECT COUNT(*) FROM fills").fetchone()[0])
+
     def iter_fills(self, wallet: str | None = None) -> list[sqlite3.Row]:
         if wallet:
             return list(
@@ -391,6 +394,14 @@ def ingest(
     targets = targets or labeled_targets()
     windows = windows or default_windows()
     log = progress.write if progress is not None else (lambda *_: None)
+
+    def log_line(msg: str) -> None:
+        log(msg)
+        if progress is not None:
+            try:
+                progress.flush()
+            except Exception:
+                pass
     summary: dict[str, Any] = {"fills": 0, "markets": 0, "by_wallet": {}}
     for label, address in targets:
         store.upsert_wallet(address, label)
@@ -402,7 +413,7 @@ def ingest(
                     address, as_maker=as_maker, start=start, end=end
                 )
                 if existing >= 1000:
-                    log(
+                    log_line(
                         f"{label:16} {role:6} {window_label[:28]:28} "
                         f"skip ({existing} already archived)\n"
                     )
@@ -426,13 +437,13 @@ def ingest(
                 )
                 t0 = min((r["bet_time"] for r in rows), default=0)
                 t1 = max((r["bet_time"] for r in rows), default=0)
-                log(
+                log_line(
                     f"{label:16} {role:6} {window_label[:28]:28} "
                     f"{n:5} fills  {_utc(t0)} → {_utc(t1)}\n"
                 )
         summary["by_wallet"][label] = wallet_n
     summary["markets"] = enrich_markets(client, store)
-    log(f"markets enriched {summary['markets']}\n")
+    log_line(f"markets enriched {summary['markets']}\n")
     return summary
 
 

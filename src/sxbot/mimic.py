@@ -107,14 +107,16 @@ class MimicBot:
         return market
 
     def _prime_taker(self, address: str) -> None:
-        start = int(time.time()) - 6 * 3600
+        # Oldest-first pagination: a 6h window with 2 pages only keeps the *start*
+        # of the window. Use a short window and enough pages to cover Gary's rate.
+        start = int(time.time()) - 2 * 3600
         for as_maker in (False, True):
             rows = self.client.v2_trades_for_bettor(
                 address,
                 as_maker=as_maker,
                 start_date=start,
                 per_page=100,
-                pages=2,
+                pages=8,
             )
             for raw in rows:
                 fill = str(raw.get("fillHash") or "")
@@ -143,7 +145,7 @@ class MimicBot:
             return 0
 
         n = 0
-        start = int(time.time()) - 30 * 60
+        start = int(time.time()) - 20 * 60
         stake = to_base_units(self.settings.stake_usdc, self.meta.decimals)
         for label, address in self.targets:
             n += self._copy_taker(label, address, start, stake)
@@ -157,7 +159,7 @@ class MimicBot:
             as_maker=False,
             start_date=start,
             per_page=100,
-            pages=2,
+            pages=4,
         )
         n = 0
         for raw in rows:
