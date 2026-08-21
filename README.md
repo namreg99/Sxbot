@@ -65,6 +65,9 @@ sxbot run             # paper-trade loop (writes jsonl)
 sxbot summary         # what has been recorded so far
 sxbot grade           # after games finish: did those paper quotes win?
 sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
+sxbot archive         # pull winter + summer fill history into SQLite
+sxbot profiles        # sport / odds / live-vs-pregame style report
+sxbot mimic           # paper-copy new fills from those wallets (V2 only)
 ```
 
 `sxbot flow --once` and `sxbot run --once` do two polls then exit.
@@ -89,7 +92,7 @@ See `.env.example`. The knobs that matter:
 
 | Variable | Meaning |
 | --- | --- |
-| `SX_SPORT_IDS` | Universe. `8,1,3,2,5` = football, basketball, baseball, hockey, soccer |
+| `SX_SPORT_IDS` | Universe. `8,1,3,2,5,6` = football, basketball, baseball, hockey, soccer, tennis |
 | `SX_ONLY_MAIN_LINE` | Skip alternate spreads/totals |
 | `SX_WATCH_LIVE` | Include in-play books in the intel poll (default on) |
 | `SX_ALLOW_LIVE` | Off by default. Allow paper/live *orders* on in-play |
@@ -99,7 +102,8 @@ See `.env.example`. The knobs that matter:
 | `SX_STAKE_USDC` | Size per join/take. Mainnet minimum is currently 5 USDC |
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
 | `SX_FOLLOW_STYLE` | `join` (sit behind makers), `take` (hit now), `mixed` (take strong steam, else join) |
-| `SX_SHARP_WALLETS` | Known sharp addresses. V2 only. Used by `sxbot sharp` to learn habits before V3 |
+| `SX_SHARP_WALLETS` | Extra addresses on top of the four already paired (Gary, cypherprod, BotswanaMC, HedgeHog) |
+| `SX_MIMIC_MAX_DECIMAL` | Mimic skips longer shots than this (default 3.5 — do not clone 7.84 alts) |
 | `SX_BOOK_SOURCE` | `auto` (V2 on mainnet until cutover), or force `v2` / `v3` |
 
 ## How sharp money is recovered without wallets
@@ -116,7 +120,11 @@ See `.env.example`. The knobs that matter:
 
 ## Fingerprinting wallets before V3
 
-Known profitable addresses are useful until **August 25**, then they vanish from the public API. Put them in `SX_SHARP_WALLETS` and run `sxbot sharp`. That does **not** copy-trade them. It answers the only question that still matters after V3: are they mostly **makers** (join), **takers** (hit now), or **mixed** — and in which sports. The bot then follows that *habit* on anonymous books.
+Known profitable addresses are useful until **August 25**, then they vanish from the public API. Four wallets are already paired from unique fills (GambleGuruGary, cypherprod, BotswanaMC, HedgeHog). `sxbot archive` pulls the biggest V2 sample the API will give us across **winter (Dec/Jan NFL/NBA/NHL)** and **summer (soccer, baseball, tennis)** windows — not one endless scrape from December 1, which never reaches January because Gary prints hundreds of fills a day.
+
+`sxbot profiles` turns that SQLite into a style card: maker vs taker, sport mix (tennis included), live vs pregame, odds buckets (the ≤1.12 hammer vs 7.84 lottery tickets), scale-in, and **net** P&L vs the gross “Won” leaderboard. `sxbot mimic` paper-copies **new** taker fills at `SX_STAKE_USDC` (and HedgeHog-style resting quotes) while V2 still attributes them. It does not dump history into the paper log; the first poll only primes seen fill ids. Longshots above `SX_MIMIC_MAX_DECIMAL` (3.5) are skipped.
+
+After V3, drop mimic. Keep `SX_FOLLOW_STYLE=take` for a Gary-like soccer/tennis steam taker, `join` for a HedgeHog-like MM, and do not mix them.
 
 ## How a signal is built
 

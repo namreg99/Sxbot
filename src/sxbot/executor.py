@@ -43,7 +43,12 @@ class Executor:
         if not settings.dry_run:
             self._account = _load_account(settings.private_key)
 
-    def execute(self, signal: Signal, stake: int) -> dict[str, Any]:
+    def execute(
+        self,
+        signal: Signal,
+        stake: int,
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         record = {
             "ts": time.time(),
             "dry_run": self.settings.dry_run,
@@ -66,6 +71,8 @@ class Executor:
             "outcome_one": signal.market.outcome_one,
             "outcome_two": signal.market.outcome_two,
         }
+        if extra:
+            record.update(extra)
         if self.settings.dry_run:
             log.info(
                 "PAPER %s %s %s @ %.3f%%  %s",

@@ -11,4 +11,6 @@ htmlcov/
 sxbot-paper.jsonl
 sxbot-flow.jsonl
 sxbot-sharp.jsonl
+sxbot-history.sqlite
+sxbot-history.sqlite-*
 .DS_Store

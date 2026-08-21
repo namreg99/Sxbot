@@ -28,10 +28,12 @@ def test_dry_run_writes_paper_log(tmp_path) -> None:
         imbalance=0.2,
         confidence=0.8,
     )
-    record = executor.execute(signal, 5_000_000)
+    record = executor.execute(signal, 5_000_000, extra={"source": "mimic", "copied_wallet": "GambleGuruGary"})
     assert record["dry_run"] is True
+    assert record["source"] == "mimic"
     assert paper.exists()
     line = paper.read_text(encoding="utf-8").strip()
     assert "join_maker" in line
     assert "Rams" in line
+    assert "GambleGuruGary" in line
     assert record["game_time"] == 2_000_000_000

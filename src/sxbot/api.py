@@ -199,30 +199,44 @@ class SxClient:
         bettor: str,
         *,
         as_maker: bool,
-        per_page: int = 50,
+        per_page: int = 100,
         pages: int = 2,
+        start_date: int | None = None,
+        end_date: int | None = None,
     ) -> list[dict[str, Any]]:
+        """Fills for one address. Oldest-first from start_date.
+
+        The API returns `nextKey` but the *request* cursor is `paginationKey`
+        (same as /markets/active). Passing nextKey as nextKey is a no-op and
+        repeats page 1 forever.
+        """
         out: list[dict[str, Any]] = []
-        next_key: str | None = None
+        pagination_key: str | None = None
+        seen_cursors: set[str] = set()
         for _ in range(pages):
-            params: dict[str, Any] = {
-                "bettor": bettor,
-                "maker": "true" if as_maker else "false",
-                "perPage": per_page,
-            }
-            if next_key:
-                params["nextKey"] = next_key
+            params = v2_trade_query_params(
+                bettor,
+                as_maker=as_maker,
+                per_page=per_page,
+                start_date=start_date,
+                end_date=end_date,
+                pagination_key=pagination_key,
+            )
             data = self._get("/trades", params)
             if isinstance(data, dict):
-                out.extend(data.get("trades") or [])
-                next_key = data.get("nextKey")
+                rows = data.get("trades") or []
+                out.extend(rows)
+                pagination_key = data.get("nextKey")
             elif isinstance(data, list):
                 out.extend(data)
-                next_key = None
+                pagination_key = None
             else:
                 break
-            if not next_key:
+            if not pagination_key:
                 break
+            if pagination_key in seen_cursors:
+                break
+            seen_cursors.add(pagination_key)
         return out
 
     def find_markets(self, market_hashes: list[str]) -> list[dict[str, Any]]:
@@ -270,6 +284,29 @@ class SxClient:
 
     def balance(self) -> dict[str, Any]:
         return self._get("/user/balance-v3")
+
+
+def v2_trade_query_params(
+    bettor: str,
+    *,
+    as_maker: bool,
+    per_page: int = 100,
+    start_date: int | None = None,
+    end_date: int | None = None,
+    pagination_key: str | None = None,
+) -> dict[str, Any]:
+    params: dict[str, Any] = {
+        "bettor": bettor,
+        "maker": "true" if as_maker else "false",
+        "perPage": per_page,
+    }
+    if start_date is not None:
+        params["startDate"] = start_date
+    if end_date is not None:
+        params["endDate"] = end_date
+    if pagination_key:
+        params["paginationKey"] = pagination_key
+    return params
 
 
 def _as_order_rows(data: Any) -> list[dict[str, Any]]:

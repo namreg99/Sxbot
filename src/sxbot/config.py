@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 from sxbot.rollout import MAINNET_API, TESTNET_API
 
 DEFAULT_MARKET_TYPES = (226, 52, 342, 3, 28, 2)
+# Football, basketball, baseball, hockey, soccer, tennis.
+DEFAULT_SPORT_IDS = (8, 1, 3, 2, 5, 6)
 
 
 def _bool(name: str, default: bool) -> bool:
@@ -69,6 +71,9 @@ class Settings:
     follow_style: str = "join"
     sharp_wallets: tuple[str, ...] = ()
     sharp_log: str = "sxbot-sharp.jsonl"
+    archive_path: str = "sxbot-history.sqlite"
+    mimic_max_decimal: float = 3.5
+    mimic_copy_makers: bool = True
 
     @classmethod
     def load(cls) -> Settings:
@@ -81,7 +86,7 @@ class Settings:
             private_key=os.getenv("SX_PRIVATE_KEY") or None,
             dry_run=_bool("SX_DRY_RUN", True),
             stake_usdc=float(os.getenv("SX_STAKE_USDC", "5")),
-            sport_ids=_ints("SX_SPORT_IDS", (8, 1, 3, 2, 5)),
+            sport_ids=_ints("SX_SPORT_IDS", DEFAULT_SPORT_IDS),
             league_ids=_ints("SX_LEAGUE_IDS", ()),
             market_types=_ints("SX_MARKET_TYPES", DEFAULT_MARKET_TYPES),
             only_main_line=_bool("SX_ONLY_MAIN_LINE", True),
@@ -106,6 +111,9 @@ class Settings:
             follow_style=(os.getenv("SX_FOLLOW_STYLE", "join").strip().lower() or "join"),
             sharp_wallets=_addrs("SX_SHARP_WALLETS"),
             sharp_log=os.getenv("SX_SHARP_LOG", "sxbot-sharp.jsonl"),
+            archive_path=os.getenv("SX_ARCHIVE_PATH", "sxbot-history.sqlite"),
+            mimic_max_decimal=float(os.getenv("SX_MIMIC_MAX_DECIMAL", "3.5")),
+            mimic_copy_makers=_bool("SX_MIMIC_COPY_MAKERS", True),
         )
 
     @property

@@ -46,6 +46,22 @@ def main(argv: list[str] | None = None) -> int:
         "sharp",
         help="Fingerprint SX_SHARP_WALLETS (V2 only) — maker vs taker habits that survive V3",
     )
+    archive = sub.add_parser(
+        "archive",
+        help="Pull V2 fill history for labeled wallets into SQLite (winter + summer windows)",
+    )
+    archive.add_argument("--pages", type=int, default=80, help="Max pages per wallet/role/window (100 fills each)")
+    archive.add_argument("--from", dest="since", default=None, help="YYYY-MM-DD single window start")
+    archive.add_argument("--to", dest="until", default=None, help="YYYY-MM-DD single window end")
+    sub.add_parser(
+        "profiles",
+        help="Print strategy profiles from sxbot-history.sqlite (run archive first)",
+    )
+    mimic = sub.add_parser(
+        "mimic",
+        help="Paper-trade new fills from labeled wallets (V2 only; skips longshots)",
+    )
+    mimic.add_argument("--once", action="store_true", help="Prime + one copy poll then exit")
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -58,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "summary":
         print_summary(settings.flow_log, settings.paper_log)
         return 0
+    if args.cmd == "profiles":
+        return cmd_profiles(settings)
     _warn_if_v3_mainnet_not_live(settings)
     with SxClient(settings.api_base, settings.api_key, user_agent=settings.user_agent) as client:
         try:
@@ -67,6 +85,10 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_grade(client, settings)
             if args.cmd == "sharp":
                 return cmd_sharp(client, settings)
+            if args.cmd == "archive":
+                return cmd_archive(client, settings, args)
+            if args.cmd == "mimic":
+                return cmd_mimic(client, settings, once=args.once)
             bot = Bot(settings, client)
             if args.cmd == "scan":
                 return cmd_scan(bot, args.limit)
@@ -180,13 +202,18 @@ def cmd_grade(client: SxClient, settings: Settings) -> int:
 
 
 def cmd_sharp(client: SxClient, settings: Settings) -> int:
-    if not settings.sharp_wallets:
-        print(format_profiles([]))
-        return 0
+    from sxbot.wallets import labeled_targets
+
+    targets = labeled_targets(settings)
+    start = int(time.time()) - 30 * 86400
     profiles = []
-    for address in settings.sharp_wallets:
-        maker_fills = client.v2_trades_for_bettor(address, as_maker=True)
-        taker_fills = client.v2_trades_for_bettor(address, as_maker=False)
+    for label, address in targets:
+        maker_fills = client.v2_trades_for_bettor(
+            address, as_maker=True, start_date=start, pages=6
+        )
+        taker_fills = client.v2_trades_for_bettor(
+            address, as_maker=False, start_date=start, pages=6
+        )
         open_orders = client.v2_orders_for_maker(address)
         hashes = list(
             dict.fromkeys(
@@ -198,16 +225,73 @@ def cmd_sharp(client: SxClient, settings: Settings) -> int:
         hashes = [h for h in hashes if h][:30]
         found = client.find_markets(hashes) if hashes else []
         markets = {str(row.get("marketHash") or ""): row for row in found}
-        profiles.append(
-            profile_wallet(
-                address,
-                maker_fills=maker_fills,
-                taker_fills=taker_fills,
-                open_orders=open_orders,
-                markets=markets,
-            )
+        profile = profile_wallet(
+            address,
+            maker_fills=maker_fills,
+            taker_fills=taker_fills,
+            open_orders=open_orders,
+            markets=markets,
         )
+        print(f"# {label}")
+        profiles.append(profile)
     print(format_profiles(profiles))
+    return 0
+
+
+def cmd_archive(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:
+    from sxbot.archive import HistoryStore, ingest, parse_day
+
+    windows = None
+    if args.since:
+        windows = [
+            (
+                parse_day(args.since),
+                parse_day(args.until) if args.until else None,
+                "custom",
+            )
+        ]
+    print(
+        f"archiving labeled wallets → {settings.archive_path}  "
+        f"(pages={args.pages} per role/window; tennis included in later profiles)"
+    )
+    with HistoryStore(settings.archive_path) as store:
+        summary = ingest(
+            client,
+            store,
+            windows=windows,
+            pages=args.pages,
+            progress=sys.stdout,
+        )
+    print(
+        f"done  fills+={summary['fills']}  markets+={summary['markets']}  "
+        f"by_wallet={summary['by_wallet']}"
+    )
+    print("next: sxbot profiles")
+    return 0
+
+
+def cmd_profiles(settings: Settings) -> int:
+    from sxbot.archive import HistoryStore, format_style_profiles, load_profiles
+
+    path = settings.archive_path
+    with HistoryStore(path) as store:
+        profiles = load_profiles(store)
+        print(format_style_profiles(profiles))
+        if profiles:
+            print(f"\nsource {path}  fills {store.fill_count()}")
+    return 0
+
+
+def cmd_mimic(client: SxClient, settings: Settings, *, once: bool) -> int:
+    from sxbot.mimic import MimicBot
+
+    bot = MimicBot(settings, client)
+    if not once:
+        bot.run()
+        return 0
+    primed = bot.step()
+    copied = bot.step()
+    print(f"mimic primed then copied {copied} new fill(s) (prime={primed})")
     return 0
 
 
