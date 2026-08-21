@@ -64,6 +64,14 @@ def test_books_from_flat_list_group_by_hash() -> None:
     assert books["0xc"].outcome_one == ()
 
 
+def test_identical_books_share_a_content_version() -> None:
+    a = book_from_v2_orders("0xabc", [_order()], version=None)
+    b = book_from_v2_orders("0xabc", [_order()], version=None)
+    assert a.version == b.version
+    c = book_from_v2_orders("0xabc", [_order(totalBetSize="2000000")], version=None)
+    assert c.version != a.version
+
+
 def test_taker_row_keeps_taker_outcome() -> None:
     trades = public_trades_from_v2(
         [

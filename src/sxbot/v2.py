@@ -10,6 +10,7 @@ Drop this module after V3 is live — the bot already speaks V3 snapshots.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections import defaultdict
 from typing import Any, Iterable
@@ -34,11 +35,17 @@ def is_resting(order: dict[str, Any], now: int | None = None) -> bool:
     return remaining_size(order) > 0
 
 
+def _levels_version(one: tuple[Level, ...], two: tuple[Level, ...]) -> str:
+    blob = "1:" + ",".join(f"{lvl.percentage_odds}:{lvl.size}" for lvl in one)
+    blob += "|2:" + ",".join(f"{lvl.percentage_odds}:{lvl.size}" for lvl in two)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()[:16]
+
+
 def book_from_v2_orders(
     market_hash: str,
     orders: Iterable[dict[str, Any]],
     *,
-    version: str,
+    version: str | None = None,
     now: int | None = None,
 ) -> Book:
     one: dict[int, int] = {}
@@ -59,13 +66,15 @@ def book_from_v2_orders(
             Level(odds, size) for odds, size in sorted(bucket.items(), key=lambda item: -item[0])
         )
 
-    return Book(market_hash, version, levels(one), levels(two))
+    o1 = levels(one)
+    o2 = levels(two)
+    return Book(market_hash, version or _levels_version(o1, o2), o1, o2)
 
 
 def books_from_v2_orders(
     orders: list[dict[str, Any]] | dict[str, Any],
     *,
-    version: str,
+    version: str | None = None,
     now: int | None = None,
     market_hashes: Iterable[str] | None = None,
 ) -> dict[str, Book]:

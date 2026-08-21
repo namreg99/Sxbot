@@ -173,9 +173,11 @@ class SxClient:
                 rows.extend(data)
         return public_trades_from_v2(rows)
 
-    def v2_books(self, market_hashes: list[str], *, version: str) -> dict[str, Book]:
+    def v2_books(self, market_hashes: list[str], *, version: str | None = None) -> dict[str, Book]:
         orders = self.v2_orders(market_hashes) if market_hashes else []
-        return books_from_v2_orders(orders, version=version, market_hashes=market_hashes)
+        return books_from_v2_orders(
+            orders, version=version, market_hashes=market_hashes
+        )
 
     def create_orders(self, orders: list[dict[str, Any]], *, wait: bool = True) -> dict[str, Any]:
         response = self._http.post(

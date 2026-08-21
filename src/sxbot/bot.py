@@ -89,15 +89,16 @@ class Bot:
 
     def _scan_v2(self, markets: list[Market]) -> list[tuple[Market, BookView]]:
         hashes = [market.market_hash for market in markets]
-        version = str(int(time.time() * 1000))
+        poll_version = str(int(time.time() * 1000))
         try:
-            books = self.client.v2_books(hashes, version=version)
+            books = self.client.v2_books(hashes)
         except Exception as exc:
             log.warning("v2 book fetch failed: %s", exc)
             return []
         rows: list[tuple[Market, BookView]] = []
         for market in markets:
-            book = books.get(market.market_hash) or Book(market.market_hash, version, (), ())
+            raw = books.get(market.market_hash) or Book(market.market_hash, "empty", (), ())
+            book = Book(raw.market_hash, poll_version, raw.outcome_one, raw.outcome_two)
             rows.append((market, analyze(book)))
         return rows
 
@@ -133,6 +134,12 @@ class Bot:
         tape: dict[str, list[PublicTrade]] | None,
     ) -> tuple[BookView | None, FlowReport | None]:
         prev = self.books.get(market.market_hash)
+        if (
+            prev is not None
+            and prev.levels_one == view.levels_one
+            and prev.levels_two == view.levels_two
+        ):
+            return prev, None
         self.books[market.market_hash] = view
         if prev is None:
             return None, None
