@@ -163,6 +163,7 @@ def test_style_profile_from_sqlite(tmp_path) -> None:
             ]
         )
         profiles = load_profiles(store)
+        assert store.fills_in_window(addr, as_maker=False, start=kickoff - 10_000, end=kickoff) == 2
     assert len(profiles) == 1
     p = profiles[0]
     assert p.label == "GambleGuruGary"

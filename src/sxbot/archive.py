@@ -233,8 +233,27 @@ class HistoryStore:
         )
         self._db.commit()
 
-    def fill_count(self) -> int:
-        return int(self._db.execute("SELECT COUNT(*) FROM fills").fetchone()[0])
+    def fills_in_window(
+        self,
+        wallet: str,
+        *,
+        as_maker: bool,
+        start: int,
+        end: int | None,
+    ) -> int:
+        if end is None:
+            row = self._db.execute(
+                "SELECT COUNT(*) AS n FROM fills "
+                "WHERE wallet=? AND is_maker=? AND bet_time>=?",
+                (wallet.lower(), 1 if as_maker else 0, start),
+            ).fetchone()
+        else:
+            row = self._db.execute(
+                "SELECT COUNT(*) AS n FROM fills "
+                "WHERE wallet=? AND is_maker=? AND bet_time>=? AND bet_time<?",
+                (wallet.lower(), 1 if as_maker else 0, start, end),
+            ).fetchone()
+        return int(row["n"] if row else 0)
 
     def iter_fills(self, wallet: str | None = None) -> list[sqlite3.Row]:
         if wallet:
@@ -355,6 +374,7 @@ def enrich_markets(client: SxClient, store: HistoryStore) -> int:
         found = client.find_markets(chunk)
         rows = [market_row(raw) for raw in found]
         added += store.upsert_markets(row for row in rows if row)
+        time.sleep(0.2)
     return added
 
 
@@ -378,6 +398,15 @@ def ingest(
         for start, end, window_label in windows:
             for as_maker in roles:
                 role = "maker" if as_maker else "taker"
+                existing = store.fills_in_window(
+                    address, as_maker=as_maker, start=start, end=end
+                )
+                if existing >= 1000:
+                    log(
+                        f"{label:16} {role:6} {window_label[:28]:28} "
+                        f"skip ({existing} already archived)\n"
+                    )
+                    continue
                 rows = pull_fills(
                     client,
                     address,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import Any, Iterator
 
 import httpx
@@ -52,8 +53,18 @@ class SxClient:
         self.close()
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
-        response = self._http.get(path, params=params)
-        return self._parse(response)
+        delay = 2.0
+        last: httpx.Response | None = None
+        for _ in range(8):
+            response = self._http.get(path, params=params)
+            last = response
+            if response.status_code == 429:
+                time.sleep(delay)
+                delay = min(delay * 2, 45.0)
+                continue
+            return self._parse(response)
+        assert last is not None
+        raise SxApiError(last.status_code, str(last.request.url), last.text)
 
     def _parse(self, response: httpx.Response) -> Any:
         if response.status_code >= 400:
@@ -237,6 +248,7 @@ class SxClient:
             if pagination_key in seen_cursors:
                 break
             seen_cursors.add(pagination_key)
+            time.sleep(0.25)
         return out
 
     def find_markets(self, market_hashes: list[str]) -> list[dict[str, Any]]:
