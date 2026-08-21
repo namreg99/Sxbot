@@ -143,6 +143,8 @@ Known profitable addresses are useful until **August 25**, then they vanish from
 
 After V3, drop mimic. Keep `SX_FOLLOW_STYLE=take` for a Gary-like soccer/tennis steam taker, `join` for a HedgeHog-like MM, and do not mix them.
 
+A ~150k-fill sample (Dec/Jan + Jun + late July, including tennis) is what `sxbot profiles` is for. In that sample: **BotswanaMC** is the only labeled wallet with large **net** P&L, mostly pregame soccer and NFL at pick’em prices (1.80–2.20). **GambleGuruGary** prints millions of gross “Won” and is still **net negative** — the 1.13 hammer is a weapon, not the book. **Tennis lost money** for both takers. **cypherprod** is mixed maker/taker and the only one who is net-positive *live*. **HedgeHog** is the two-sided MM (`join`). Do not clone all four as one bot.
+
 ## How a signal is built
 
 Each market is reduced to a two-sided view:
