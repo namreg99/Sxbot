@@ -13,7 +13,7 @@ from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
-from sxbot.models import Book, Market, PublicTrade
+from sxbot.models import Book, Market, PublicTrade, Side
 from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.risk import RiskGate
 from sxbot.rollout import uses_v2_books
@@ -308,6 +308,63 @@ def scan_radar_window(bot: Bot, *, seconds: float, poll_seconds: float | None = 
     return list(latest.values())
 
 
+_MOTIVE_PLAIN: dict[str, str] = {
+    "maker_steam": (
+        "the market makers just moved their own price toward this side with "
+        "nobody betting into it — that is them repricing on information, "
+        "not reacting to bettors"
+    ),
+    "size_rotation": (
+        "the market makers pulled their resting money off the other side and "
+        "piled it onto this one"
+    ),
+    "tob_lag": (
+        "the real weight of money already sitting in the book is on this "
+        "side, even though the displayed best price has not caught up yet"
+    ),
+    "crossed": (
+        "the market makers already moved on, and there is still a stale "
+        "price sitting on the other side for the taking"
+    ),
+}
+
+
+def _confidence_word(confidence: float) -> str:
+    if confidence >= 0.90:
+        return "very strong"
+    if confidence >= 0.75:
+        return "strong"
+    if confidence >= 0.60:
+        return "worth a look"
+    return "early / weak"
+
+
+def outcome_name(market: Market, side: Side) -> str:
+    return market.outcome_one if side.is_outcome_one else market.outcome_two
+
+
+def plain_pick_sentence(row: RadarRow) -> str:
+    report = row.report
+    side = report.side
+    outcome = outcome_name(row.market, side) if side is not None else "?"
+    why = _MOTIVE_PLAIN.get(report.motive.value, report.motive.value)
+    word = _confidence_word(report.confidence)
+    when = kickoff_iso(row.market.game_time) or "kickoff time unknown"
+    return (
+        f"{outcome} ({row.market.league_label}, {row.market.label}) — {why}. "
+        f"Signal: {word} ({report.confidence:.2f}). Kicks off {when}."
+    )
+
+
+def plain_picks(rows: list[RadarRow], *, limit: int = 5) -> list[str]:
+    ranked = sorted(
+        (r for r in rows if r.report.actionable),
+        key=lambda r: r.report.confidence,
+        reverse=True,
+    )
+    return [plain_pick_sentence(row) for row in ranked[:limit]]
+
+
 def format_radar(rows: list[RadarRow], *, limit: int = 25) -> str:
     if not rows:
         return (
@@ -315,12 +372,25 @@ def format_radar(rows: list[RadarRow], *, limit: int = 25) -> str:
             "first poll (the classifier needs two snapshots to see a move) — "
             "run `sxbot radar` again in a few seconds."
         )
+    lines: list[str] = []
+    picks = plain_picks(rows, limit=5)
+    if picks:
+        lines.append("TOP PICKS RIGHT NOW (read these, bet yourself — nothing is auto-placed)")
+        lines.append("")
+        for i, sentence in enumerate(picks, 1):
+            lines.append(f"{i}. {sentence}")
+        lines.append("")
+        lines.append(
+            "These are inferred from how the book is being managed, not proof. "
+            "Run `sxbot scoreboard` after enough games settle to see whether "
+            "this signal actually beats the price already in the book."
+        )
+        lines.append("")
+        lines.append("-" * 70)
+        lines.append("")
     ranked = sorted(rows, key=lambda r: r.report.confidence, reverse=True)
-    lines = [
-        "Where the book says smart money is right now (no wallets, no auto-betting).",
-        "Read this, then place the bet yourself if you agree with the reasoning.",
-        "",
-    ]
+    lines.append("Full detail (same data, for anyone who wants the numbers):")
+    lines.append("")
     for row in ranked[:limit]:
         report = row.report
         side = report.side.value if report.side else "-"

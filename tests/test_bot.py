@@ -1,4 +1,4 @@
-from sxbot.bot import RadarRow, format_radar, pick_universe
+from sxbot.bot import RadarRow, format_radar, outcome_name, pick_universe, plain_pick_sentence, plain_picks
 from sxbot.flow import FlowReport, Motive
 from sxbot.models import Side
 from sxbot.orderbook import analyze
@@ -59,3 +59,33 @@ def test_format_radar_ranks_by_confidence() -> None:
     assert first_idx < second_idx
     assert "1 actionable / 2 flagged" not in text  # both are actionable here
     assert "2 actionable / 2 flagged" in text
+
+
+def test_outcome_name_picks_the_right_side() -> None:
+    market = make_market(outcome_one="Rams", outcome_two="49ers")
+    assert outcome_name(market, Side.OUTCOME_ONE) == "Rams"
+    assert outcome_name(market, Side.OUTCOME_TWO) == "49ers"
+
+
+def test_plain_pick_sentence_is_readable_and_names_the_team() -> None:
+    row = _radar_row(confidence=0.93)
+    sentence = plain_pick_sentence(row)
+    assert row.market.outcome_one in sentence  # side is OUTCOME_ONE in the fixture
+    assert "market makers" in sentence
+    assert "very strong" in sentence
+    assert "0.93" in sentence
+
+
+def test_plain_picks_ranked_and_capped() -> None:
+    rows = [_radar_row(confidence=c) for c in (0.5, 0.95, 0.8, 0.65, 0.99, 0.61)]
+    picks = plain_picks(rows, limit=3)
+    assert len(picks) == 3
+    assert "0.99" in picks[0]
+    assert "0.95" in picks[1]
+    assert "0.80" in picks[2]
+
+
+def test_format_radar_leads_with_top_picks() -> None:
+    rows = [_radar_row(confidence=0.9)]
+    text = format_radar(rows)
+    assert text.index("TOP PICKS") < text.index("Full detail")
