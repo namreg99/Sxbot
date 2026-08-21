@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.env
+.pytest_cache/
+.coverage
+htmlcov/
+sxbot-paper.jsonl
+.DS_Store
