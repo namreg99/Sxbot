@@ -20,6 +20,7 @@ def test_docs_book_mid_spread_imbalance() -> None:
     assert round(view.imbalance, 4) == round((6 - 5) / 11, 4)
     assert not view.crossed
     assert view.two_sided
+    assert view.dw_mid is not None
 
 
 def test_one_sided_has_no_mid() -> None:

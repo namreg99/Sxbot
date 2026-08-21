@@ -30,6 +30,8 @@ def make_settings(**overrides) -> Settings:
         enable_take_stale=True,
         enable_join_maker=True,
         paper_log="sxbot-paper.jsonl",
+        flow_log="sxbot-flow.jsonl",
+        min_steam_hits=2,
     )
     return replace(base, **overrides) if overrides else base
 

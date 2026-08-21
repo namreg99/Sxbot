@@ -47,13 +47,17 @@ class Settings:
     enable_take_stale: bool
     enable_join_maker: bool
     paper_log: str
+    flow_log: str
+    min_steam_hits: int
     user_agent: str = "sxbot/0.1"
 
     @classmethod
     def load(cls) -> Settings:
         load_dotenv()
         return cls(
-            api_base=os.getenv("SX_API_BASE", "https://api.sx.bet").rstrip("/"),
+            # V3 is testnet-only until 2026-08-25 10:00 EST (see sxbot.rollout);
+            # default here until then to avoid mainnet 403s on V3-only routes.
+            api_base=os.getenv("SX_API_BASE", "https://api.toronto.sx.bet").rstrip("/"),
             api_key=os.getenv("SX_API_KEY") or None,
             private_key=os.getenv("SX_PRIVATE_KEY") or None,
             dry_run=_bool("SX_DRY_RUN", True),
@@ -76,6 +80,8 @@ class Settings:
             enable_take_stale=_bool("SX_ENABLE_TAKE_STALE", True),
             enable_join_maker=_bool("SX_ENABLE_JOIN_MAKER", True),
             paper_log=os.getenv("SX_PAPER_LOG", "sxbot-paper.jsonl"),
+            flow_log=os.getenv("SX_FLOW_LOG", "sxbot-flow.jsonl"),
+            min_steam_hits=int(os.getenv("SX_MIN_STEAM_HITS", "2")),
         )
 
     @property

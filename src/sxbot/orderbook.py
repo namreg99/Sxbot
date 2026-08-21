@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sxbot.models import Book, Level, Side
-from sxbot.units import ODDS_SCALE, bps_of_odds, taker_capacity, taker_odds, to_percent
+from sxbot.units import bps_of_odds, taker_capacity, taker_odds, to_percent
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,9 @@ class BookView:
     spread_one: int | None
     imbalance: float
     crossed: bool
+    dw_mid: int | None
+    levels_one: tuple[tuple[int, int], ...]
+    levels_two: tuple[tuple[int, int], ...]
 
     @property
     def two_sided(self) -> bool:
@@ -50,6 +53,16 @@ def _total(levels: tuple[Level, ...]) -> int:
     return sum(level.size for level in levels)
 
 
+def _vwap(levels: tuple[Level, ...], *, invert: bool = False) -> int | None:
+    num = 0
+    den = 0
+    for level in levels:
+        price = taker_odds(level.percentage_odds) if invert else level.percentage_odds
+        num += price * level.size
+        den += level.size
+    return (num // den) if den else None
+
+
 def analyze(book: Book) -> BookView:
     o1 = book.outcome_one
     o2 = book.outcome_two
@@ -68,6 +81,9 @@ def analyze(book: Book) -> BookView:
     size_two = _total(o2)
     denom = size_one + size_two
     imbalance = ((size_one - size_two) / denom) if denom else 0.0
+    dw_bid = _vwap(o1)
+    dw_ask = _vwap(o2, invert=True)
+    dw_mid = (dw_bid + dw_ask) // 2 if dw_bid is not None and dw_ask is not None else None
     return BookView(
         market_hash=book.market_hash,
         version=book.version,
@@ -83,6 +99,9 @@ def analyze(book: Book) -> BookView:
         spread_one=spread_one,
         imbalance=imbalance,
         crossed=crossed,
+        dw_mid=dw_mid,
+        levels_one=tuple((lvl.percentage_odds, lvl.size) for lvl in o1),
+        levels_two=tuple((lvl.percentage_odds, lvl.size) for lvl in o2),
     )
 
 
@@ -92,8 +111,9 @@ def format_view(view: BookView) -> str:
 
     spr = view.spread_bps()
     spr_s = f"{spr:4d}bp" if spr is not None else "   n/a"
+    dw = pct(view.dw_mid)
     return (
-        f"mid {pct(view.mid_one)}  spr {spr_s}  "
+        f"mid {pct(view.mid_one)}  dw {dw}  spr {spr_s}  "
         f"imb {view.imbalance:+.2f}  "
         f"O1 {pct(view.best_one)} {view.size_one / 1e6:8.1f}u  "
         f"O2 {pct(view.best_two)} {view.size_two / 1e6:8.1f}u"

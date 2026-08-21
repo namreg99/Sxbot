@@ -45,6 +45,12 @@ Watch line moves as they happen (still no orders):
 sxbot watch
 ```
 
+Classify **sharp vs taker flow** from the book — this is the V3-safe view of "what is the informed money doing":
+
+```bash
+sxbot flow
+```
+
 Paper-trade the strategy. This is the default — `SX_DRY_RUN=true` logs intended orders to `sxbot-paper.jsonl` and never signs anything:
 
 ```bash
@@ -56,7 +62,7 @@ Live trading additionally needs `SX_API_KEY`, `SX_PRIVATE_KEY`, `pip install -e 
 Mainnet API: `https://api.sx.bet`  
 Testnet API: `https://api.toronto.sx.bet`
 
-Some cloud IPs get `403` on mainnet book and public-tape routes. Testnet is unrestricted and is the right place to develop. Set `SX_API_BASE=https://api.toronto.sx.bet`.
+**V3 is testnet-only until August 25, 2026, 10:00 AM EST** ([SX Bet docs](https://docs.sx.bet/developers/new-in-v3): *"Do not point a production integration at V3 until August 25th at 10:00 AM EST"*). Until then, mainnet's V3 routes — `GET /orderbook-v3/snapshot`, `GET /trades-v3/public`, `POST /orders-v3` — return `403`/`401`, while always-on reference routes like `GET /metadata/obv3` and `GET /markets/active` keep working. That split (some mainnet routes fine, V3-specific ones not) is the tell that this is a rollout gate, not an IP block. This bot is built entirely on V3, so it **defaults to testnet** (`SX_API_BASE=https://api.toronto.sx.bet`) until the cutover. Switch to `https://api.sx.bet` after it passes.
 
 ## Configuration
 
@@ -73,6 +79,22 @@ See `.env.example`. The knobs that matter:
 | `SX_STAKE_USDC` | Size per join/take. Mainnet minimum is currently 5 USDC |
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first) |
 
+## How sharp money is recovered without wallets
+
+V3 strips addresses on purpose. The replacement is book microstructure, which does not need an identity:
+
+| What you see | What it usually means | What we do |
+| --- | --- | --- |
+| Both sides of the book reprice the same way, often with **no** tape print | Makers moved fair value (steam) | Join that side |
+| Resting size pulled off one outcome and added to the other | Makers want to be long that outcome | Join that side |
+| Depth-weighted mid leads the displayed mid | The body of the book is informed; the top is leftover or a probe | Join the body |
+| Size disappears at the best **and** the anonymized tape printed | A taker lifted offers | Ignore — do not copy takers |
+| Leftover quotes sitting through the new mid (crossed book) | Stale size after a steam | Take it — that *is* betting with the makers |
+
+`sxbot flow` prints that classification live. `sxbot run` only trades the first four rows when they agree. Events are appended to `sxbot-flow.jsonl` so you can see, after the fact, which motives actually made money.
+
+Wallet copy-trading is a V2 leftover and is not used. After August 25 the same `flow` command is how you read the market on mainnet.
+
 ## How a signal is built
 
 Each market is reduced to a two-sided view:
@@ -82,7 +104,7 @@ Each market is reduced to a two-sided view:
 - **Mid** = average of those
 - **Imbalance** = `(size_one − size_two) / total_size`
 
-A **maker reprice** is both sides shifting in the same direction. A **size flow** is makers adding on one outcome and pulling the other. Conflicting tape is ignored. Live orders go through the usual SX V3 path: EIP-712 `Order` signatures, `GTC` to join, `IOC` to take, and a heartbeat so resting quotes die if the process does.
+A **maker steam** is both sides shifting in the same direction. A **size rotation** is makers adding on one outcome and pulling the other. A **taker hit** is a one-sided size drop that the public tape explains — those are not followed. Conflicting tape is ignored. Live orders go through the usual SX V3 path: EIP-712 `Order` signatures, `GTC` to join, `IOC` to take, and a heartbeat so resting quotes die if the process does.
 
 Docs used: [market making](https://docs.sx.bet/developers/market-making), [order book](https://docs.sx.bet/developers/order-book), [public trades](https://docs.sx.bet/developers/public-trades), [posting orders](https://docs.sx.bet/developers/posting-orders).
 

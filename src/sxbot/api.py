@@ -5,6 +5,7 @@ from typing import Any, Iterator
 import httpx
 
 from sxbot.models import Book, ExchangeMeta, Market, PublicTrade
+from sxbot.rollout import V3_MAINNET_LIVE_AT, v3_mainnet_is_live
 
 
 class SxApiError(RuntimeError):
@@ -13,11 +14,11 @@ class SxApiError(RuntimeError):
         self.url = url
         self.body = body
         extra = ""
-        if status == 403:
+        if status == 403 and "api.sx.bet" in url and not v3_mainnet_is_live():
             extra = (
-                " SX Bet returned 403 for this IP. Some cloud ranges are blocked on "
-                "mainnet book/trade routes — try SX_API_BASE=https://api.toronto.sx.bet "
-                "or run from a residential network."
+                f" V3 is testnet-only until {V3_MAINNET_LIVE_AT.isoformat()} "
+                "(docs: 'Do not point a production integration at V3 until August 25th "
+                "at 10:00 AM EST'). Use SX_API_BASE=https://api.toronto.sx.bet until then."
             )
         super().__init__(f"HTTP {status} {url}: {body[:300]}{extra}")
 

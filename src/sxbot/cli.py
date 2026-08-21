@@ -8,6 +8,8 @@ import time
 from sxbot.api import SxApiError, SxClient
 from sxbot.bot import Bot, describe_book, print_scan
 from sxbot.config import Settings
+from sxbot.flow import Motive
+from sxbot.rollout import V3_MAINNET_LIVE_AT, v3_mainnet_is_live
 from sxbot.strategy import evaluate
 
 
@@ -24,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--limit", type=int, default=30)
     watch = sub.add_parser("watch", help="Poll books and print maker-follow signals (no orders)")
     watch.add_argument("--once", action="store_true")
+    flow = sub.add_parser(
+        "flow",
+        help="Classify sharp vs taker flow from the book (V3-safe, no wallets)",
+    )
+    flow.add_argument("--once", action="store_true")
     run = sub.add_parser("run", help="Paper or live trading loop (dry-run unless SX_DRY_RUN=false)")
     run.add_argument("--once", action="store_true", help="One poll then exit")
 
@@ -35,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     settings = Settings.load()
+    _warn_if_v3_mainnet_not_live(settings)
     with SxClient(settings.api_base, settings.api_key, user_agent=settings.user_agent) as client:
         try:
             if args.cmd == "doctor":
@@ -44,6 +52,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_scan(bot, args.limit)
             if args.cmd == "watch":
                 return cmd_watch(bot, once=args.once)
+            if args.cmd == "flow":
+                return cmd_flow(bot, once=args.once)
             if args.cmd == "run":
                 if args.once:
                     # Two polls so the strategy has a previous book to compare.
@@ -60,6 +70,17 @@ def main(argv: list[str] | None = None) -> int:
             print(exc, file=sys.stderr)
             return 2
     return 1
+
+
+def _warn_if_v3_mainnet_not_live(settings: Settings) -> None:
+    if not settings.is_testnet and not v3_mainnet_is_live():
+        print(
+            f"WARNING: V3 is testnet-only until {V3_MAINNET_LIVE_AT.isoformat()} "
+            "(SX Bet docs: 'Do not point a production integration at V3 until "
+            "August 25th at 10:00 AM EST'). Book/trade routes on mainnet will 403 "
+            "until then. Set SX_API_BASE=https://api.toronto.sx.bet for now.",
+            file=sys.stderr,
+        )
 
 
 def cmd_doctor(client: SxClient, settings: Settings) -> int:
@@ -118,28 +139,47 @@ def cmd_scan(bot: Bot, limit: int) -> int:
 
 def cmd_watch(bot: Bot, *, once: bool) -> int:
     print("watching maker line moves — no orders will be posted")
+    return _poll_flow(bot, once=once, signals_only=True)
+
+
+def cmd_flow(bot: Bot, *, once: bool) -> int:
+    print("classifying sharp flow from the book (no wallets, V3-safe) — no orders")
+    return _poll_flow(bot, once=once, signals_only=False)
+
+
+def _poll_flow(bot: Bot, *, once: bool, signals_only: bool) -> int:
     rounds = 2 if once else None
     n = 0
     while True:
-        _watch_round(bot)
+        tape = bot.pull_tape()
+        for market, view in bot.scan_many(bot.qualifying_markets()):
+            prev, report = bot.classify_row(market, view, tape)
+            if prev is None or report is None:
+                continue
+            if report.motive is Motive.NONE:
+                continue
+            if signals_only:
+                signals = evaluate(
+                    market, prev, view, bot.settings, bot.ladder, report=report
+                )
+                if not signals:
+                    continue
+                print(describe_book(market, view))
+                for signal in signals:
+                    print(
+                        f"  SIGNAL {signal.action.value:11} {signal.side.value:12} "
+                        f"conf={signal.confidence:.2f}  {signal.reason}"
+                    )
+                continue
+            side = report.side.value if report.side else "-"
+            print(describe_book(market, view))
+            print(
+                f"  FLOW {report.motive.value:14} {side:12} "
+                f"conf={report.confidence:.2f} steam={report.steam_hits} "
+                f"persist={report.persistence:.2f} tape={report.tape_prints}  "
+                f"{'; '.join(report.reasons)}"
+            )
         n += 1
         if rounds is not None and n >= rounds:
             return 0
         time.sleep(bot.settings.poll_seconds)
-
-
-def _watch_round(bot: Bot) -> None:
-    for market, view in bot.scan_many(bot.qualifying_markets()):
-        prev = bot.books.get(market.market_hash)
-        bot.books[market.market_hash] = view
-        if prev is None:
-            continue
-        signals = evaluate(market, prev, view, bot.settings, bot.ladder)
-        if not signals:
-            continue
-        print(describe_book(market, view))
-        for signal in signals:
-            print(
-                f"  SIGNAL {signal.action.value:11} {signal.side.value:12} "
-                f"conf={signal.confidence:.2f}  {signal.reason}"
-            )

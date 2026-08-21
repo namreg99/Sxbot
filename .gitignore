@@ -9,4 +9,5 @@ build/
 .coverage
 htmlcov/
 sxbot-paper.jsonl
+sxbot-flow.jsonl
 .DS_Store
