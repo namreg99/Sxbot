@@ -9,7 +9,8 @@ from sxbot.api import SxApiError, SxClient
 from sxbot.bot import Bot, describe_book, print_scan
 from sxbot.config import Settings
 from sxbot.flow import Motive
-from sxbot.journal import print_summary
+from sxbot.grade import format_grade, grade_paper
+from sxbot.journal import load_jsonl, print_summary
 from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
 from sxbot.strategy import evaluate
 from sxbot.v2 import book_from_v2_orders
@@ -36,6 +37,10 @@ def main(argv: list[str] | None = None) -> int:
     run = sub.add_parser("run", help="Paper or live trading loop (dry-run unless SX_DRY_RUN=false)")
     run.add_argument("--once", action="store_true", help="Two polls then exit")
     sub.add_parser("summary", help="Print recorded flow + paper-trade logs")
+    sub.add_parser(
+        "grade",
+        help="Score paper bets after games are reported (assumes fills; not a historical book backtest)",
+    )
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -53,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.cmd == "doctor":
                 return cmd_doctor(client, settings)
+            if args.cmd == "grade":
+                return cmd_grade(client, settings)
             bot = Bot(settings, client)
             if args.cmd == "scan":
                 return cmd_scan(bot, args.limit)
@@ -151,6 +158,15 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
         print(f"public tape   {len(trades)} recent trades")
     except SxApiError as exc:
         print(f"public tape   FAILED ({exc.status})")
+    return 0
+
+
+def cmd_grade(client: SxClient, settings: Settings) -> int:
+    rows = load_jsonl(settings.paper_log)
+    hashes = list(dict.fromkeys(str(row.get("market") or "") for row in rows if row.get("market")))
+    found = client.find_markets(hashes) if hashes else []
+    markets = {str(row.get("marketHash") or ""): row for row in found}
+    print(format_grade(grade_paper(rows, markets, decimals=6)))
     return 0
 
 

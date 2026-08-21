@@ -62,6 +62,9 @@ class Executor:
             "imbalance": signal.imbalance,
             "phase": signal.market.phase(),
             "motive": signal.motive,
+            "game_time": signal.market.game_time,
+            "outcome_one": signal.market.outcome_one,
+            "outcome_two": signal.market.outcome_two,
         }
         if self.settings.dry_run:
             log.info(

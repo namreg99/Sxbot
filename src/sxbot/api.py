@@ -179,6 +179,16 @@ class SxClient:
             orders, version=version, market_hashes=market_hashes
         )
 
+    def find_markets(self, market_hashes: list[str]) -> list[dict[str, Any]]:
+        """Active or settled markets by hash. Up to 30 hashes per request."""
+        out: list[dict[str, Any]] = []
+        for i in range(0, len(market_hashes), 30):
+            chunk = market_hashes[i : i + 30]
+            data = self._get("/markets/find", params={"marketHashes": ",".join(chunk)})
+            if isinstance(data, list):
+                out.extend(row for row in data if isinstance(row, dict))
+        return out
+
     def create_orders(self, orders: list[dict[str, Any]], *, wait: bool = True) -> dict[str, Any]:
         response = self._http.post(
             "/orders-v3",

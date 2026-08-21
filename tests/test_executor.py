@@ -34,3 +34,4 @@ def test_dry_run_writes_paper_log(tmp_path) -> None:
     line = paper.read_text(encoding="utf-8").strip()
     assert "join_maker" in line
     assert "Rams" in line
+    assert record["game_time"] == 2_000_000_000

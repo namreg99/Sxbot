@@ -4,6 +4,23 @@ A trading bot for [SX Bet](https://sx.bet), a peer-to-peer sports betting exchan
 
 Nothing here is guaranteed edge. The useful output right now is (1) a paper log of what we *would* have done on live books, and (2) a flow log of where informed size showed up, pregame vs live.
 
+## How a trade works (plain English)
+
+SX Bet is not a sportsbook like DraftKings. It is a marketplace. People post prices, other people take them — the same idea as a stock exchange, but the "stock" is "will this team cover / will this total go over."
+
+**Market makers** are the people who keep a price up on *both* sides of a game (Team A *and* Team B, or Over *and* Under). When they change their mind they move those prices. That move is the "smart money" this bot is trying to follow. It does **not** copy random winning wallets.
+
+Every couple of seconds the bot looks at the live prices and asks:
+
+1. Did the makers just move both sides the same way? → sit on that side, one tick worse than them (so we are not jumping in front).
+2. Did they pull money off one side and pile it on the other? → same thing, join the heavy side.
+3. Is leftover junk sitting at a stale price? → take it, because that *is* betting with the makers.
+4. Did a random bettor just smash the top of the book? → ignore it.
+
+In **paper mode** (the default) it writes "I would have bet $5 on X at 49%" to a file. It does **not** send an order and it does **not** spend money. Real orders only happen if you later turn dry-run off and add keys.
+
+**We cannot backtest last season.** SX does not keep old order books, so there is nothing to rewind. What we *can* do is leave paper mode running, then after games finish run `sxbot grade`. That scores those paper quotes *if they had been filled*. Joining as a maker often does not fill, so graded P&L is the optimistic case.
+
 ## How it works
 
 SX Bet is an exchange, not a sportsbook. The people who matter are the **makers** who keep two-sided quotes up. When they know something they reprice both sides, rotate size onto one outcome, or leave stale quotes through the new mid. Takers lifting the top look different: size disappears on one side *and* the tape prints.
@@ -46,6 +63,7 @@ sxbot scan            # rank live books by maker-size imbalance
 sxbot flow            # classify steam / rotation / lag / taker / crossed
 sxbot run             # paper-trade loop (writes jsonl)
 sxbot summary         # what has been recorded so far
+sxbot grade           # after games finish: did those paper quotes win?
 ```
 
 `sxbot flow --once` and `sxbot run --once` do two polls then exit.
