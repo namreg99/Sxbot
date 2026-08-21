@@ -86,7 +86,7 @@ def test_take_style_hits_steam_instead_of_joining() -> None:
 
 
 def test_mixed_style_still_joins_lower_confidence_lag() -> None:
-    prev = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="1")
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="2")
     signals = _signals(prev, curr, follow_style="mixed")
     assert signals

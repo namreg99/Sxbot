@@ -5,24 +5,33 @@ we copy **new** taker fills (Gary / Botswana style) at *our* stake, and
 optionally rest on a maker's current quotes (HedgeHog style). Long-shot alts
 are skipped by default — cypherprod's 7.84 dogs are not the strategy.
 
-First poll only primes seen fill hashes so we do not dump the last hour into
-the paper log.
+First poll primes the last 20 minutes of fill hashes so we do not dump that
+window into the mimic paper log (`sxbot-mimic.jsonl`, not the join log).
 """
 
 from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
+from sxbot.journal import load_jsonl
 from sxbot.models import Action, Market, Signal, Side
+from sxbot.risk import RiskGate
 from sxbot.units import decimal_odds, to_base_units, to_prob
 from sxbot.v2 import is_resting
 from sxbot.wallets import labeled_targets
 
 log = logging.getLogger("sxbot.mimic")
+
+# Oldest-first /trades pagination: priming from 2h ago with a few pages never
+# reaches "now", so the first copy poll dumped every recent fill (same Under
+# 3.5 copied a dozen times). Prime and copy the same short window.
+COPY_LOOKBACK_S = 20 * 60
+COPY_PAGES = 8
 
 
 def _decimal(odds: int) -> float:
@@ -86,7 +95,9 @@ class MimicBot:
         self.settings = settings
         self.client = client
         self.meta = client.metadata()
-        self.executor = Executor(settings, self.meta, client)
+        self.executor = Executor(settings, self.meta, client, paper_path=settings.mimic_log)
+        self.risk = RiskGate(settings, self.meta.decimals)
+        self.risk.hydrate(load_jsonl(settings.mimic_log))
         self.targets = labeled_targets(settings)
         self._seen_fills: set[str] = set()
         self._seen_orders: set[str] = set()
@@ -107,16 +118,14 @@ class MimicBot:
         return market
 
     def _prime_taker(self, address: str) -> None:
-        # Oldest-first pagination: a 6h window with 2 pages only keeps the *start*
-        # of the window. Use a short window and enough pages to cover Gary's rate.
-        start = int(time.time()) - 2 * 3600
+        start = int(time.time()) - COPY_LOOKBACK_S
         for as_maker in (False, True):
             rows = self.client.v2_trades_for_bettor(
                 address,
                 as_maker=as_maker,
                 start_date=start,
                 per_page=100,
-                pages=8,
+                pages=COPY_PAGES,
             )
             for raw in rows:
                 fill = str(raw.get("fillHash") or "")
@@ -145,7 +154,7 @@ class MimicBot:
             return 0
 
         n = 0
-        start = int(time.time()) - 20 * 60
+        start = int(time.time()) - COPY_LOOKBACK_S
         stake = to_base_units(self.settings.stake_usdc, self.meta.decimals)
         for label, address in self.targets:
             n += self._copy_taker(label, address, start, stake)
@@ -159,7 +168,7 @@ class MimicBot:
             as_maker=False,
             start_date=start,
             per_page=100,
-            pages=4,
+            pages=COPY_PAGES,
         )
         n = 0
         for raw in rows:
@@ -177,6 +186,10 @@ class MimicBot:
                 raw,
                 reason=f"mimic {label} taker {_decimal(int(raw.get('odds') or 0)):.2f} {why}",
             )
+            blocked = self.risk.allow(signal)
+            if blocked:
+                log.info("skip mimic %s %s: %s", label, market.label, blocked)
+                continue
             self.executor.execute(
                 signal,
                 stake,
@@ -187,6 +200,7 @@ class MimicBot:
                     "copied_stake_usdc": int(raw.get("stake") or 0) / 1e6,
                 },
             )
+            self.risk.record(signal, stake)
             n += 1
         return n
 
@@ -207,19 +221,25 @@ class MimicBot:
             signal = signal_from_maker_quote(
                 market, order, reason=f"mimic {label} resting quote"
             )
+            blocked = self.risk.allow(signal)
+            if blocked:
+                log.info("skip mimic %s %s: %s", label, market.label, blocked)
+                continue
             self.executor.execute(
                 signal,
                 stake,
                 extra={"source": "mimic", "copied_wallet": label, "copied_order": oid},
             )
+            self.risk.record(signal, stake)
             n += 1
         return n
 
     def run(self) -> None:
         log.info(
-            "mimic paper bot — copying %s at %.0f USDC (dry_run=%s, max_decimal=%.2f)",
+            "mimic paper bot — copying %s at %.0f USDC into %s (dry_run=%s, max_decimal=%.2f)",
             ", ".join(label for label, _ in self.targets),
             self.settings.stake_usdc,
+            self.settings.mimic_log,
             self.settings.dry_run,
             self.settings.mimic_max_decimal,
         )

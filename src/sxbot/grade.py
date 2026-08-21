@@ -190,7 +190,7 @@ def format_grade(bets: list[GradedBet], *, now: int | None = None) -> str:
     if stacked:
         lines.append(
             f"  stacked joins  {stacked} extra join_maker quote(s) on a side already joined "
-            "(size flicker used to restack; new runs skip that)"
+            "(size flicker used to restack; classifier + risk gate now skip that)"
         )
     if settled:
         lines.append(f"settled stake    {staked:.1f} USDC")

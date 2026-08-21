@@ -43,9 +43,30 @@ def test_blocks_max_open_markets() -> None:
 def test_does_not_restack_the_same_join() -> None:
     gate = RiskGate(make_settings(max_per_market_usdc=25, max_exposure_usdc=1000))
     gate.record(_signal(hash_="0x1"))
-    assert gate.allow(_signal(hash_="0x1")) == "already joined this side"
+    assert gate.allow(_signal(hash_="0x1")) == "already on this side"
     opposite = replace(_signal(hash_="0x1"), side=Side.OUTCOME_TWO)
     assert gate.allow(opposite) is None
+
+
+def test_does_not_restack_a_take_on_the_same_side() -> None:
+    gate = RiskGate(make_settings(max_per_market_usdc=25, max_exposure_usdc=1000))
+    gate.record(_signal(Action.TAKE_FLOW, hash_="0x1"))
+    assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x1")) == "already on this side"
+
+
+def test_hydrate_remembers_paper_joins_without_reloading_dollars() -> None:
+    gate = RiskGate(make_settings(max_exposure_usdc=1000, max_per_market_usdc=25))
+    gate.hydrate(
+        [
+            {"action": "join_maker", "market": "0x1", "side": "outcome_one"},
+            {"action": "take_flow", "market": "0x2", "side": "outcome_two"},
+        ]
+    )
+    assert gate.allow(_signal(hash_="0x1")) == "already on this side"
+    assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x2")) is None  # other side
+    take_two = replace(_signal(Action.TAKE_FLOW, hash_="0x2"), side=Side.OUTCOME_TWO)
+    assert gate.allow(take_two) == "already on this side"
+    assert gate.exposure.total() == 0
 
 
 def test_blocks_per_market_cap() -> None:
@@ -64,6 +85,12 @@ def test_cancel_clears_exposure() -> None:
 def test_stake_matches_settings() -> None:
     gate = RiskGate(make_settings(stake_usdc=7.5))
     assert gate.stake() == to_base_units(7.5)
+
+
+def test_record_uses_the_stake_that_was_actually_sent() -> None:
+    gate = RiskGate(make_settings(stake_usdc=5, max_exposure_usdc=1000, max_per_market_usdc=25))
+    gate.record(_signal(hash_="0x1"), stake=7_000_000)
+    assert gate.exposure.net("0x1") == 7_000_000
 
 
 def test_blocks_live_market_even_when_watched() -> None:

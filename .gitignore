@@ -9,6 +9,7 @@ build/
 .coverage
 htmlcov/
 sxbot-paper.jsonl
+sxbot-mimic.jsonl
 sxbot-flow.jsonl
 sxbot-sharp.jsonl
 sxbot-history.sqlite

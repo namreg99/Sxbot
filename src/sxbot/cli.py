@@ -89,6 +89,10 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings.load()
     if args.cmd == "summary":
         print_summary(settings.flow_log, settings.paper_log)
+        mimic_rows = load_jsonl(settings.mimic_log)
+        if mimic_rows:
+            print()
+            print(f"mimic paper    {len(mimic_rows)}   ({settings.mimic_log})")
         return 0
     if args.cmd == "profiles":
         return cmd_profiles(settings)
@@ -217,12 +221,23 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
 
 
 def cmd_grade(client: SxClient, settings: Settings) -> int:
-    rows = load_jsonl(settings.paper_log)
+    _print_grade(client, settings.paper_log, title="join/run paper")
+    mimic_rows = load_jsonl(settings.mimic_log)
+    if mimic_rows:
+        print()
+        print("-" * 70)
+        print()
+        _print_grade(client, settings.mimic_log, title="mimic paper")
+    return 0
+
+
+def _print_grade(client: SxClient, path: str, *, title: str) -> None:
+    rows = load_jsonl(path)
     hashes = list(dict.fromkeys(str(row.get("market") or "") for row in rows if row.get("market")))
     found = client.find_markets(hashes) if hashes else []
     markets = index_markets(found)
+    print(f"# {title}  ({path})")
     print(format_grade(grade_paper(rows, markets, decimals=6)))
-    return 0
 
 
 def cmd_sharp(client: SxClient, settings: Settings) -> int:

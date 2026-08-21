@@ -74,6 +74,7 @@ class Settings:
     archive_path: str = "sxbot-history.sqlite"
     mimic_max_decimal: float = 3.5
     mimic_copy_makers: bool = True
+    mimic_log: str = "sxbot-mimic.jsonl"
 
     @classmethod
     def load(cls) -> Settings:
@@ -114,6 +115,7 @@ class Settings:
             archive_path=os.getenv("SX_ARCHIVE_PATH", "sxbot-history.sqlite"),
             mimic_max_decimal=float(os.getenv("SX_MIMIC_MAX_DECIMAL", "3.5")),
             mimic_copy_makers=_bool("SX_MIMIC_COPY_MAKERS", True),
+            mimic_log=os.getenv("SX_MIMIC_LOG", "sxbot-mimic.jsonl"),
         )
 
     @property

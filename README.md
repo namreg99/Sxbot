@@ -122,6 +122,7 @@ See `.env.example`. The knobs that matter:
 | `SX_FOLLOW_STYLE` | `join` (sit behind makers), `take` (hit now), `mixed` (take strong steam, else join) |
 | `SX_SHARP_WALLETS` | Extra addresses on top of the four already paired (Gary, cypherprod, BotswanaMC, HedgeHog) |
 | `SX_MIMIC_MAX_DECIMAL` | Mimic skips longer shots than this (default 3.5 — do not clone 7.84 alts) |
+| `SX_MIMIC_LOG` | Mimic paper log (default `sxbot-mimic.jsonl`) — do not share with `SX_PAPER_LOG` |
 | `SX_BOOK_SOURCE` | `auto` (V2 on mainnet until cutover), or force `v2` / `v3` |
 
 ## How sharp money is recovered without wallets
@@ -140,7 +141,7 @@ See `.env.example`. The knobs that matter:
 
 Known profitable addresses are useful until **August 25**, then they vanish from the public API. Four wallets are already paired from unique fills (GambleGuruGary, cypherprod, BotswanaMC, HedgeHog). `sxbot archive` pulls the biggest V2 sample the API will give us across **winter (Dec/Jan NFL/NBA/NHL)** and **summer (soccer, baseball, tennis)** windows — not one endless scrape from December 1, which never reaches January because Gary prints hundreds of fills a day.
 
-`sxbot profiles` turns that SQLite into a style card: maker vs taker, sport mix (tennis included), live vs pregame, odds buckets (the ≤1.12 hammer vs 7.84 lottery tickets), scale-in, and **net** P&L vs the gross “Won” leaderboard. `sxbot mimic` paper-copies **new** taker fills at `SX_STAKE_USDC` (and HedgeHog-style resting quotes) while V2 still attributes them. It does not dump history into the paper log; the first poll only primes seen fill ids. Longshots above `SX_MIMIC_MAX_DECIMAL` (3.5) are skipped.
+`sxbot profiles` turns that SQLite into a style card: maker vs taker, sport mix (tennis included), live vs pregame, odds buckets (the ≤1.12 hammer vs 7.84 lottery tickets), scale-in, and **net** P&L vs the gross “Won” leaderboard. `sxbot mimic` paper-copies **new** taker fills at `SX_STAKE_USDC` (and HedgeHog-style resting quotes) while V2 still attributes them. Copies go to `sxbot-mimic.jsonl`, not the join paper log. The first poll primes the last 20 minutes of fill ids so it does not dump that window as “new.” One market+side is copied once (Gary hitting Under 3.5 ten times is still one paper take). Longshots above `SX_MIMIC_MAX_DECIMAL` (3.5) are skipped.
 
 `sxbot overlap` is the last labeled check before cutover: each flow signal is tagged with which of the four wallets were *resting* on the flagged side (`quoted_by`) and which *took* it on the same poll (`takers`). Leave `sxbot flow` or `sxbot run` going on V2, then `sxbot overlap`. After August 25 that column is gone; keep the jsonl and grade it against SX outcomes.
 

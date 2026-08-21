@@ -127,14 +127,28 @@ def _both_sides_shifted(prev: BookView, curr: BookView) -> Side | None:
 
 
 def _size_rotation(prev: BookView, curr: BookView, min_imbalance: float) -> Side | None:
-    _ = min_imbalance
+    """True rotation, not a $1 flicker on a book that was already lopsided.
+
+    `min_imbalance` is a real gate (it used to be ignored). Also require the
+    size that actually moved to be at least 5% of the previous book so a
+    one-lot cancel cannot look like makers flipping the inventory.
+    """
     d1 = curr.size_one - prev.size_one
     d2 = curr.size_two - prev.size_two
     if d1 > 0 and d2 < 0:
-        return Side.OUTCOME_ONE
-    if d2 > 0 and d1 < 0:
-        return Side.OUTCOME_TWO
-    return None
+        side = Side.OUTCOME_ONE
+        moved = min(d1, -d2)
+    elif d2 > 0 and d1 < 0:
+        side = Side.OUTCOME_TWO
+        moved = min(d2, -d1)
+    else:
+        return None
+    if abs(curr.imbalance) < min_imbalance:
+        return None
+    prev_total = prev.size_one + prev.size_two
+    if prev_total > 0 and moved < prev_total * 0.05:
+        return None
+    return side
 
 
 def _tob_lag_side(curr: BookView, min_bps: int) -> tuple[Side | None, int | None]:
@@ -170,6 +184,15 @@ def _taker_hit(
     return None
 
 
+def _version_is_stale(prev: str, curr: str) -> bool:
+    """Numeric book versions only. V3 hashes are not ordered — never `hash <= hash`."""
+    if not prev or not curr:
+        return False
+    if prev.isdigit() and curr.isdigit():
+        return int(curr) <= int(prev)
+    return False
+
+
 def classify(
     prev: BookView,
     curr: BookView,
@@ -177,7 +200,7 @@ def classify(
     trades: list[PublicTrade] | None = None,
     steam_hits: int = 0,
 ) -> FlowReport:
-    if curr.version and prev.version and curr.version <= prev.version:
+    if _version_is_stale(prev.version, curr.version):
         return FlowReport(Motive.NONE, None, 0, 1.0, None, 0, steam_hits, 0.0)
     if not curr.two_sided:
         return FlowReport(Motive.NONE, None, 0, persistence(prev, curr), None, 0, steam_hits, 0.0)
@@ -187,6 +210,7 @@ def classify(
         move_bps = bps_of_odds(curr.mid_one - prev.mid_one)
     persist = persistence(prev, curr)
     lag_side, lag_bps = _tob_lag_side(curr, settings.min_mid_move_bps)
+    prev_lag, prev_lag_bps = _tob_lag_side(prev, settings.min_mid_move_bps)
     steam = _both_sides_shifted(prev, curr)
     if steam is not None and abs(move_bps) < settings.min_mid_move_bps:
         steam = None
@@ -228,10 +252,20 @@ def classify(
         )
 
     if motive is Motive.NONE and lag_side is not None:
-        motive = Motive.TOB_LAG
-        side = lag_side
-        confidence = 0.58
-        reasons.append(f"depth-weighted mid leads top-of-book by {lag_bps:+d}bp")
+        # tob_lag is a *state* (body still ahead of TOB). Size flicker used to
+        # re-fire it every poll and restack the same join. Only emit when the
+        # lag is new or getting worse.
+        sticky = (
+            prev_lag is lag_side
+            and prev_lag_bps is not None
+            and lag_bps is not None
+            and abs(lag_bps) <= abs(prev_lag_bps)
+        )
+        if not sticky:
+            motive = Motive.TOB_LAG
+            side = lag_side
+            confidence = 0.58
+            reasons.append(f"depth-weighted mid leads top-of-book by {lag_bps:+d}bp")
 
     if motive is Motive.NONE and taker is not None:
         motive = Motive.TAKER_HIT

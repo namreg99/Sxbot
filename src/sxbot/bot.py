@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -13,6 +13,7 @@ from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
+from sxbot.journal import load_jsonl
 from sxbot.models import Book, Market, PublicTrade, Side
 from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
@@ -36,13 +37,14 @@ class Bot:
         self.executor = Executor(settings, self.meta, client)
         self.books: dict[str, BookView] = {}
         self.steam = SteamTracker()
-        self._seen_trades: set[str] = set()
+        self._seen_trades: OrderedDict[str, None] = OrderedDict()
         self._tape_primed = False
         self._last_heartbeat = 0.0
         self.book_source = "v2" if uses_v2_books(settings.api_base, book_source=settings.book_source) else "v3"
         self._labeled = labeled_addresses(settings)
         self._quotes_by_market: dict[str, MarketQuotes] = {}
         self._takers_by_market: dict[str, dict[str, tuple[str, ...]]] = {}
+        self.risk.hydrate(load_jsonl(settings.paper_log))
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
         now = int(time.time())
@@ -127,17 +129,18 @@ class Bot:
             log.debug("public tape failed: %s", exc)
             return None
         if not self._tape_primed:
-            self._seen_trades = {t.trade_id for t in tape}
+            for trade in tape:
+                self._seen_trades[trade.trade_id] = None
             self._tape_primed = True
             return {}
         fresh: dict[str, list[PublicTrade]] = defaultdict(list)
         for trade in tape:
             if trade.trade_id in self._seen_trades:
                 continue
-            self._seen_trades.add(trade.trade_id)
+            self._seen_trades[trade.trade_id] = None
             fresh[trade.market_hash].append(trade)
-        if len(self._seen_trades) > 4000:
-            self._seen_trades = set(list(self._seen_trades)[-2000:])
+        while len(self._seen_trades) > 4000:
+            self._seen_trades.popitem(last=False)
         return dict(fresh)
 
     def classify_row(
@@ -188,7 +191,7 @@ class Bot:
                     continue
                 stake = max(self.risk.stake(), self.meta.min_order)
                 self.executor.execute(signal, stake)
-                self.risk.record(signal)
+                self.risk.record(signal, stake)
                 executed += 1
         return executed
 

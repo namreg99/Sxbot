@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import time
+from typing import Any
 
 from sxbot.config import Settings
 from sxbot.models import Action, Exposure, Signal
 from sxbot.units import to_base_units
+
+_TRADE_ACTIONS = {Action.JOIN_MAKER, Action.TAKE_STALE, Action.TAKE_FLOW}
 
 
 class RiskGate:
@@ -17,6 +20,25 @@ class RiskGate:
 
     def stake(self) -> int:
         return to_base_units(self.settings.stake_usdc, self.decimals)
+
+    def hydrate(self, rows: list[dict[str, Any]]) -> None:
+        """Remember market+side already quoted so a restart does not restack.
+
+        Does *not* reload dollar exposure — session caps still reset. Game
+        hashes are unique, so keeping joined_sides across restarts only
+        blocks quoting the same settled/open market again.
+        """
+        for row in rows:
+            action = str(row.get("action") or "")
+            market = str(row.get("market") or "")
+            side = str(row.get("side") or "")
+            if not market or not side:
+                continue
+            if action == Action.CANCEL.value:
+                self.joined_sides = {item for item in self.joined_sides if item[0] != market}
+                continue
+            if action in {a.value for a in _TRADE_ACTIONS}:
+                self.joined_sides.add((market, side))
 
     def allow(self, signal: Signal) -> str | None:
         """Return a rejection reason, or None if the signal may trade."""
@@ -39,18 +61,19 @@ class RiskGate:
             return "max total exposure"
         if self.exposure.net(market_hash) + stake > max_mkt:
             return "max per-market exposure"
-        if signal.action is Action.JOIN_MAKER and (market_hash, signal.side.value) in self.joined_sides:
-            return "already joined this side"
+        if (market_hash, signal.side.value) in self.joined_sides:
+            return "already on this side"
         return None
 
-    def record(self, signal: Signal) -> None:
+    def record(self, signal: Signal, stake: int | None = None) -> None:
         market_hash = signal.market.market_hash
         if signal.action is Action.CANCEL:
             self.exposure.by_market.pop(market_hash, None)
             self.quoted.discard(market_hash)
             self.joined_sides = {item for item in self.joined_sides if item[0] != market_hash}
             return
-        self.exposure.add(market_hash, signal.side, self.stake())
+        amount = stake if stake is not None else self.stake()
+        self.exposure.add(market_hash, signal.side, amount)
         self.quoted.add(market_hash)
-        if signal.action is Action.JOIN_MAKER:
+        if signal.action in _TRADE_ACTIONS:
             self.joined_sides.add((market_hash, signal.side.value))
