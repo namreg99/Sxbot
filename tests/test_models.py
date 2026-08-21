@@ -24,6 +24,8 @@ def test_market_from_api() -> None:
     )
     assert market.label == "A ML / B ML"
     assert market.league_id == 243
+    assert market.phase(now=0) == "pregame"
+    assert market.phase(now=2) == "live"
 
 
 def test_book_from_api() -> None:

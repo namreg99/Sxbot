@@ -5,6 +5,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from sxbot.rollout import MAINNET_API, TESTNET_API
+
 DEFAULT_MARKET_TYPES = (226, 52, 342, 3, 28, 2)
 
 
@@ -50,14 +52,16 @@ class Settings:
     flow_log: str
     min_steam_hits: int
     user_agent: str = "sxbot/0.1"
+    watch_live: bool = True
+    book_source: str = "auto"
 
     @classmethod
     def load(cls) -> Settings:
         load_dotenv()
         return cls(
-            # V3 is testnet-only until 2026-08-25 10:00 EST (see sxbot.rollout);
-            # default here until then to avoid mainnet 403s on V3-only routes.
-            api_base=os.getenv("SX_API_BASE", "https://api.toronto.sx.bet").rstrip("/"),
+            # Real books are on mainnet. Before the V3 cutover the bot aggregates
+            # V2 GET /orders into the same Book the V3 classifier uses.
+            api_base=os.getenv("SX_API_BASE", MAINNET_API).rstrip("/"),
             api_key=os.getenv("SX_API_KEY") or None,
             private_key=os.getenv("SX_PRIVATE_KEY") or None,
             dry_run=_bool("SX_DRY_RUN", True),
@@ -82,8 +86,10 @@ class Settings:
             paper_log=os.getenv("SX_PAPER_LOG", "sxbot-paper.jsonl"),
             flow_log=os.getenv("SX_FLOW_LOG", "sxbot-flow.jsonl"),
             min_steam_hits=int(os.getenv("SX_MIN_STEAM_HITS", "2")),
+            watch_live=_bool("SX_WATCH_LIVE", True),
+            book_source=os.getenv("SX_BOOK_SOURCE", "auto").strip().lower() or "auto",
         )
 
     @property
     def is_testnet(self) -> bool:
-        return "toronto" in self.api_base
+        return "toronto" in self.api_base or self.api_base.rstrip("/") == TESTNET_API.rstrip("/")

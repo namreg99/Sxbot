@@ -53,3 +53,13 @@ def test_cancel_clears_exposure() -> None:
 def test_stake_matches_settings() -> None:
     gate = RiskGate(make_settings(stake_usdc=7.5))
     assert gate.stake() == to_base_units(7.5)
+
+
+def test_blocks_live_market_even_when_watched() -> None:
+    gate = RiskGate(make_settings(allow_live=False, watch_live=True))
+    signal = _signal()
+    live = make_market(market_hash="0x1", game_time=1)
+    from dataclasses import replace
+
+    live_signal = replace(signal, market=live)
+    assert gate.allow(live_signal) == "live market disabled"

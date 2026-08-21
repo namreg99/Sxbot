@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -103,6 +104,13 @@ class Market:
     def label(self) -> str:
         return f"{self.outcome_one} / {self.outcome_two}"
 
+    def is_live(self, now: int | None = None) -> bool:
+        now = now if now is not None else int(time.time())
+        return bool(self.game_time) and self.game_time <= now
+
+    def phase(self, now: int | None = None) -> str:
+        return "live" if self.is_live(now) else "pregame"
+
 
 @dataclass(frozen=True)
 class PublicTrade:
@@ -167,6 +175,7 @@ class Signal:
     imbalance: float
     confidence: float
     crossed: bool = False
+    motive: str = ""
 
 
 @dataclass

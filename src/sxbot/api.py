@@ -6,6 +6,7 @@ import httpx
 
 from sxbot.models import Book, ExchangeMeta, Market, PublicTrade
 from sxbot.rollout import V3_MAINNET_LIVE_AT, v3_mainnet_is_live
+from sxbot.v2 import books_from_v2_orders, public_trades_from_v2
 
 
 class SxApiError(RuntimeError):
@@ -18,7 +19,8 @@ class SxApiError(RuntimeError):
             extra = (
                 f" V3 is testnet-only until {V3_MAINNET_LIVE_AT.isoformat()} "
                 "(docs: 'Do not point a production integration at V3 until August 25th "
-                "at 10:00 AM EST'). Use SX_API_BASE=https://api.toronto.sx.bet until then."
+                "at 10:00 AM EST'). Sxbot reads mainnet V2 GET /orders until then; "
+                "do not call V3 book/trade routes on api.sx.bet before the cutover."
             )
         super().__init__(f"HTTP {status} {url}: {body[:300]}{extra}")
 
@@ -121,6 +123,60 @@ class SxClient:
         data = self._get("/trades-v3/public", params)
         return [PublicTrade.from_api(row) for row in data.get("trades") or []]
 
+    def v2_orders(
+        self,
+        market_hashes: list[str],
+        *,
+        per_page: int = 100,
+        batch_size: int = 12,
+    ) -> list[dict[str, Any]]:
+        """Resting V2 quotes. Flat list; group by marketHash yourself."""
+        out: list[dict[str, Any]] = []
+        for i in range(0, len(market_hashes), batch_size):
+            chunk = market_hashes[i : i + batch_size]
+            page = 0
+            while page < 20:
+                data = self._get(
+                    "/orders",
+                    params={
+                        "marketHashes": ",".join(chunk),
+                        "perPage": per_page,
+                        "page": page,
+                    },
+                )
+                rows = _as_order_rows(data)
+                out.extend(rows)
+                if len(rows) < per_page:
+                    break
+                page += 1
+        return out
+
+    def v2_trades(
+        self,
+        market_hashes: list[str],
+        *,
+        per_page: int = 50,
+        batch_size: int = 12,
+    ) -> list[PublicTrade]:
+        if not market_hashes:
+            return []
+        rows: list[dict[str, Any]] = []
+        for i in range(0, len(market_hashes), batch_size):
+            chunk = market_hashes[i : i + batch_size]
+            data = self._get(
+                "/trades",
+                params={"marketHashes": ",".join(chunk), "perPage": per_page},
+            )
+            if isinstance(data, dict):
+                rows.extend(data.get("trades") or [])
+            elif isinstance(data, list):
+                rows.extend(data)
+        return public_trades_from_v2(rows)
+
+    def v2_books(self, market_hashes: list[str], *, version: str) -> dict[str, Book]:
+        orders = self.v2_orders(market_hashes) if market_hashes else []
+        return books_from_v2_orders(orders, version=version, market_hashes=market_hashes)
+
     def create_orders(self, orders: list[dict[str, Any]], *, wait: bool = True) -> dict[str, Any]:
         response = self._http.post(
             "/orders-v3",
@@ -156,3 +212,15 @@ class SxClient:
 
     def balance(self) -> dict[str, Any]:
         return self._get("/user/balance-v3")
+
+
+def _as_order_rows(data: Any) -> list[dict[str, Any]]:
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)]
+    if isinstance(data, dict):
+        rows: list[dict[str, Any]] = []
+        for value in data.values():
+            if isinstance(value, list):
+                rows.extend(row for row in value if isinstance(row, dict))
+        return rows
+    return []

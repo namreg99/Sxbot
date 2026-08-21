@@ -12,9 +12,10 @@ from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
-from sxbot.models import Market, PublicTrade
+from sxbot.models import Book, Market, PublicTrade
 from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.risk import RiskGate
+from sxbot.rollout import uses_v2_books
 from sxbot.strategy import evaluate
 from sxbot.units import OddsLadder, to_percent
 
@@ -34,29 +35,40 @@ class Bot:
         self._seen_trades: set[str] = set()
         self._tape_primed = False
         self._last_heartbeat = 0.0
+        self.book_source = "v2" if uses_v2_books(settings.api_base, book_source=settings.book_source) else "v3"
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
         now = int(time.time())
         cap = limit if limit is not None else self.settings.max_markets
         out: list[Market] = []
         league_ids = self.settings.league_ids
-        fetch_cap = max(cap * 3, cap)
-        for market in self.client.active_markets(
-            only_main_line=self.settings.only_main_line,
-            sport_ids=self.settings.sport_ids,
-            types=self.settings.market_types,
-            page_size=50,
-            limit=fetch_cap,
-        ):
-            if league_ids and market.league_id not in league_ids:
-                continue
-            if market.status != "ACTIVE":
-                continue
-            if not self.settings.allow_live and market.game_time and market.game_time <= now:
-                continue
-            out.append(market)
-        out.sort(key=lambda m: m.game_time or 10**18)
-        return out[:cap]
+        sport_ids = self.settings.sport_ids or (None,)
+        per_sport = max(cap // max(len(self.settings.sport_ids), 1), 12)
+        seen: set[str] = set()
+        for sport in sport_ids:
+            kwargs: dict = dict(
+                only_main_line=self.settings.only_main_line,
+                types=self.settings.market_types,
+                page_size=50,
+                limit=per_sport * 2,
+            )
+            if sport is not None:
+                kwargs["sport_ids"] = (sport,)
+            for market in self.client.active_markets(**kwargs):
+                if market.market_hash in seen:
+                    continue
+                if league_ids and market.league_id not in league_ids:
+                    continue
+                if market.status != "ACTIVE":
+                    continue
+                seen.add(market.market_hash)
+                out.append(market)
+        return pick_universe(
+            out,
+            cap,
+            now,
+            watch_live=self.settings.watch_live or self.settings.allow_live,
+        )
 
     def scan_row(self, market: Market) -> tuple[Market, BookView] | None:
         try:
@@ -69,14 +81,34 @@ class Bot:
     def scan_many(self, markets: list[Market]) -> list[tuple[Market, BookView]]:
         if not markets:
             return []
+        if self.book_source == "v2":
+            return self._scan_v2(markets)
         workers = min(8, len(markets))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             return [row for row in pool.map(self.scan_row, markets) if row]
 
-    def pull_tape(self) -> dict[str, list[PublicTrade]] | None:
-        """Fresh anonymized prints since last poll. None = tape unavailable."""
+    def _scan_v2(self, markets: list[Market]) -> list[tuple[Market, BookView]]:
+        hashes = [market.market_hash for market in markets]
+        version = str(int(time.time() * 1000))
         try:
-            tape = self.client.public_trades(per_page=50)
+            books = self.client.v2_books(hashes, version=version)
+        except Exception as exc:
+            log.warning("v2 book fetch failed: %s", exc)
+            return []
+        rows: list[tuple[Market, BookView]] = []
+        for market in markets:
+            book = books.get(market.market_hash) or Book(market.market_hash, version, (), ())
+            rows.append((market, analyze(book)))
+        return rows
+
+    def pull_tape(self, markets: list[Market] | None = None) -> dict[str, list[PublicTrade]] | None:
+        """Fresh prints since last poll. None = tape unavailable."""
+        try:
+            if self.book_source == "v2":
+                hashes = [m.market_hash for m in (markets or [])]
+                tape = self.client.v2_trades(hashes) if hashes else []
+            else:
+                tape = self.client.public_trades(per_page=50)
         except Exception as exc:
             log.debug("public tape failed: %s", exc)
             return None
@@ -114,8 +146,8 @@ class Bot:
     def step(self) -> int:
         self._maybe_heartbeat()
         executed = 0
-        tape = self.pull_tape()
         markets = self.qualifying_markets()
+        tape = self.pull_tape(markets)
         for market, view in self.scan_many(markets):
             prev, report = self.classify_row(market, view, tape)
             if prev is None or report is None:
@@ -135,9 +167,10 @@ class Bot:
 
     def run(self) -> None:
         log.info(
-            "starting bot dry_run=%s base=%s min_order=%s USDC step=%s",
+            "starting bot dry_run=%s base=%s books=%s min_order=%s USDC step=%s",
             self.settings.dry_run,
             self.settings.api_base,
+            self.book_source,
             self.meta.min_order / 10**self.meta.decimals,
             self.meta.odds_ladder_step_size,
         )
@@ -165,6 +198,9 @@ class Bot:
             "market": market.market_hash,
             "label": market.label,
             "league": market.league_label,
+            "phase": market.phase(),
+            "book_source": self.book_source,
+            "live_enabled": market.live_enabled,
             "motive": report.motive.value,
             "side": report.side.value if report.side else None,
             "move_bps": report.move_bps,
@@ -193,6 +229,26 @@ class Bot:
             log.exception("heartbeat failed")
 
 
+def pick_universe(
+    markets: list[Market],
+    cap: int,
+    now: int,
+    *,
+    watch_live: bool,
+) -> list[Market]:
+    """Soonest pregame first; keep a slice of live books for intel."""
+    pregame = [m for m in markets if not m.is_live(now)]
+    live = [m for m in markets if m.is_live(now)]
+    pregame.sort(key=lambda m: m.game_time or 10**18)
+    live.sort(key=lambda m: m.game_time or 0, reverse=True)
+    if not watch_live:
+        return pregame[:cap]
+    live_slots = min(len(live), max(8, cap // 5)) if cap >= 10 else min(len(live), max(cap // 2, 1))
+    chosen = pregame[: max(cap - live_slots, 0)]
+    live_slots = cap - len(chosen)
+    return chosen + live[:live_slots]
+
+
 def print_scan(rows: list[tuple[Market, BookView]], limit: int = 40) -> None:
     ranked = sorted(
         ((m, v) for m, v in rows if v.two_sided),
@@ -200,13 +256,13 @@ def print_scan(rows: list[tuple[Market, BookView]], limit: int = 40) -> None:
         reverse=True,
     )
     print(
-        f"{'LEAGUE':<12} {'MARKET':<36} {'MID':>7} {'DW':>7} {'SPRD':>6} {'IMB':>6} "
+        f"{'PHASE':<8} {'LEAGUE':<12} {'MARKET':<36} {'MID':>7} {'DW':>7} {'SPRD':>6} {'IMB':>6} "
         f"{'O1%':>7} {'O1$':>7} {'O2%':>7} {'O2$':>7}"
     )
     for market, view in ranked[:limit]:
         spr = view.spread_bps()
         print(
-            f"{market.league_label[:12]:<12} {market.label[:36]:<36} "
+            f"{market.phase():<8} {market.league_label[:12]:<12} {market.label[:36]:<36} "
             f"{_pct(view.mid_one):>7} {_pct(view.dw_mid):>7} "
             f"{str(spr)+'bp' if spr is not None else 'n/a':>6} "
             f"{view.imbalance:+6.2f} "
@@ -226,4 +282,8 @@ def kickoff_iso(game_time: int) -> str:
 
 
 def describe_book(market: Market, view: BookView) -> str:
-    return f"{market.league_label}  {market.label}  {format_view(view)}  {kickoff_iso(market.game_time)}"
+    phase = market.phase().upper()
+    return (
+        f"{phase:<8} {market.league_label}  {market.label}  {format_view(view)}  "
+        f"{kickoff_iso(market.game_time)}"
+    )

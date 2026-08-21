@@ -70,6 +70,7 @@ def evaluate(
                     imbalance=curr.imbalance,
                     confidence=report.confidence,
                     crossed=True,
+                    motive=report.motive.value,
                 )
             )
             return signals
@@ -90,6 +91,7 @@ def evaluate(
                     imbalance=curr.imbalance,
                     confidence=report.confidence,
                     crossed=curr.crossed,
+                    motive=report.motive.value,
                 )
             )
     return signals

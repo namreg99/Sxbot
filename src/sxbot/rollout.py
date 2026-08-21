@@ -21,6 +21,30 @@ from datetime import datetime, timezone
 V3_MAINNET_LIVE_AT = datetime(2026, 8, 25, 15, 0, tzinfo=timezone.utc)  # 10:00 AM EST (UTC-5)
 
 
+MAINNET_API = "https://api.sx.bet"
+TESTNET_API = "https://api.toronto.sx.bet"
+
+
 def v3_mainnet_is_live(now: datetime | None = None) -> bool:
     now = now or datetime.now(timezone.utc)
     return now >= V3_MAINNET_LIVE_AT
+
+
+def uses_v2_books(
+    api_base: str,
+    now: datetime | None = None,
+    book_source: str = "auto",
+) -> bool:
+    """True when we should aggregate V2 `GET /orders` instead of V3 snapshots.
+
+    Testnet is already V3. Mainnet stays on V2 until the documented cutover,
+    unless `book_source` forces one protocol.
+    """
+    source = (book_source or "auto").strip().lower()
+    if source == "v2":
+        return True
+    if source == "v3":
+        return False
+    if "toronto" in api_base:
+        return False
+    return not v3_mainnet_is_live(now)

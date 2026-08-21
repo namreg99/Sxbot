@@ -60,6 +60,8 @@ class Executor:
             "confidence": signal.confidence,
             "mid_move_bps": signal.mid_move_bps,
             "imbalance": signal.imbalance,
+            "phase": signal.market.phase(),
+            "motive": signal.motive,
         }
         if self.settings.dry_run:
             log.info(

@@ -9,8 +9,10 @@ from sxbot.api import SxApiError, SxClient
 from sxbot.bot import Bot, describe_book, print_scan
 from sxbot.config import Settings
 from sxbot.flow import Motive
-from sxbot.rollout import V3_MAINNET_LIVE_AT, v3_mainnet_is_live
+from sxbot.journal import print_summary
+from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
 from sxbot.strategy import evaluate
+from sxbot.v2 import book_from_v2_orders
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,11 +30,12 @@ def main(argv: list[str] | None = None) -> int:
     watch.add_argument("--once", action="store_true")
     flow = sub.add_parser(
         "flow",
-        help="Classify sharp vs taker flow from the book (V3-safe, no wallets)",
+        help="Classify sharp vs taker flow from the book (no wallets)",
     )
     flow.add_argument("--once", action="store_true")
     run = sub.add_parser("run", help="Paper or live trading loop (dry-run unless SX_DRY_RUN=false)")
-    run.add_argument("--once", action="store_true", help="One poll then exit")
+    run.add_argument("--once", action="store_true", help="Two polls then exit")
+    sub.add_parser("summary", help="Print recorded flow + paper-trade logs")
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -42,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     settings = Settings.load()
+    if args.cmd == "summary":
+        print_summary(settings.flow_log, settings.paper_log)
+        return 0
     _warn_if_v3_mainnet_not_live(settings)
     with SxClient(settings.api_base, settings.api_key, user_agent=settings.user_agent) as client:
         try:
@@ -73,25 +79,29 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _warn_if_v3_mainnet_not_live(settings: Settings) -> None:
-    if not settings.is_testnet and not v3_mainnet_is_live():
+    if uses_v2_books(settings.api_base, book_source=settings.book_source):
         print(
-            f"WARNING: V3 is testnet-only until {V3_MAINNET_LIVE_AT.isoformat()} "
-            "(SX Bet docs: 'Do not point a production integration at V3 until "
-            "August 25th at 10:00 AM EST'). Book/trade routes on mainnet will 403 "
-            "until then. Set SX_API_BASE=https://api.toronto.sx.bet for now.",
+            f"V3 mainnet books are gated until {V3_MAINNET_LIVE_AT.isoformat()} "
+            "(10:00 AM EST Aug 25). Using live V2 order books on the same "
+            "flow classifier; maker addresses are ignored. After cutover this "
+            "keeps running against V3 snapshots with no strategy change.",
             file=sys.stderr,
         )
 
 
 def cmd_doctor(client: SxClient, settings: Settings) -> int:
     meta = client.metadata()
+    v2 = uses_v2_books(settings.api_base, book_source=settings.book_source)
     print(f"base          {settings.api_base}")
+    print(f"books         {'V2 orders (pre-cutover mainnet)' if v2 else 'V3 snapshot'}")
+    print(f"v3 live at    {V3_MAINNET_LIVE_AT.isoformat()}  now_live={v3_mainnet_is_live()}")
     print(f"chainId       {meta.chain_id}")
     print(f"token         {meta.base_token}")
     print(f"escrow        {meta.escrow}")
     print(f"ladder step   {meta.odds_ladder_step_size} x 1e15  ({meta.odds_ladder_step_size / 1000:.3f}%)")
     print(f"min order     {meta.min_order} base units")
     print(f"dry_run       {settings.dry_run}")
+    print(f"watch_live    {settings.watch_live}  allow_live_trades={settings.allow_live}")
     sports = client.sports()
     print(f"sports        {len(sports)}")
     from itertools import islice
@@ -100,16 +110,31 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
         islice(
             client.active_markets(
                 only_main_line=True,
-                sport_ids=settings.sport_ids[:1] or (8,),
-                page_size=5,
-                limit=5,
+                sport_ids=settings.sport_ids or (5, 3, 8),
+                page_size=10,
+                limit=10,
             ),
-            5,
+            10,
         )
     )
     print(f"sample mkts   {len(markets)}")
     if not markets:
         print("no markets returned for the configured sports")
+        return 0
+    if v2:
+        orders = client.v2_orders([m.market_hash for m in markets])
+        chosen = next(
+            (m for m in markets if any(o.get("marketHash") == m.market_hash for o in orders)),
+            markets[0],
+        )
+        book = book_from_v2_orders(chosen.market_hash, orders, version="doctor")
+        n_orders = sum(1 for o in orders if o.get("marketHash") == chosen.market_hash)
+        print(
+            f"v2 book       {chosen.phase()} {chosen.label}  "
+            f"O1={len(book.outcome_one)} O2={len(book.outcome_two)}  orders={n_orders}"
+        )
+        trades = client.v2_trades([m.market_hash for m in markets], per_page=5)
+        print(f"v2 tape       {len(trades)} recent fills (addresses discarded)")
         return 0
     try:
         book = client.snapshot(markets[0].market_hash)
@@ -132,7 +157,11 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
 def cmd_scan(bot: Bot, limit: int) -> int:
     markets = bot.qualifying_markets(limit=max(limit, 12))
     rows = bot.scan_many(markets)
-    print(f"{len(rows)} snapshots from {len(markets)} markets (showing {min(limit, len(rows))})")
+    two_sided = sum(1 for _, view in rows if view.two_sided)
+    print(
+        f"{len(rows)} books ({bot.book_source}) from {len(markets)} markets, "
+        f"{two_sided} two-sided (showing {min(limit, two_sided)})"
+    )
     print_scan(rows, limit=limit)
     return 0
 
@@ -143,7 +172,7 @@ def cmd_watch(bot: Bot, *, once: bool) -> int:
 
 
 def cmd_flow(bot: Bot, *, once: bool) -> int:
-    print("classifying sharp flow from the book (no wallets, V3-safe) — no orders")
+    print("classifying sharp flow from the book (no wallets) — no orders")
     return _poll_flow(bot, once=once, signals_only=False)
 
 
@@ -151,8 +180,9 @@ def _poll_flow(bot: Bot, *, once: bool, signals_only: bool) -> int:
     rounds = 2 if once else None
     n = 0
     while True:
-        tape = bot.pull_tape()
-        for market, view in bot.scan_many(bot.qualifying_markets()):
+        markets = bot.qualifying_markets()
+        tape = bot.pull_tape(markets)
+        for market, view in bot.scan_many(markets):
             prev, report = bot.classify_row(market, view, tape)
             if prev is None or report is None:
                 continue
