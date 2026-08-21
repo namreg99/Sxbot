@@ -10,7 +10,14 @@ from sxbot.archive import (
     profile_from_rows,
 )
 from sxbot.units import from_percent
-from sxbot.wallets import KNOWN_WALLETS, WATCH_SPORT_IDS, labeled_targets
+from sxbot.wallets import (
+    CANDIDATE_WALLETS,
+    KNOWN_WALLETS,
+    WATCH_SPORT_IDS,
+    archive_targets,
+    labeled_targets,
+    resolve_archive_targets,
+)
 
 
 def test_tennis_is_in_the_watch_universe() -> None:
@@ -27,6 +34,26 @@ def test_known_wallets_include_gary_and_hedgehog() -> None:
     assert "BotswanaMC" in labels
     names = [label for label, _ in labeled_targets()]
     assert names[0] in labels
+    assert "TennisMix" not in names
+    assert "SoccerTaker" not in names
+
+
+def test_candidates_archive_but_do_not_mimic() -> None:
+    assert "TennisMix" in CANDIDATE_WALLETS
+    assert "SoccerTaker" in CANDIDATE_WALLETS
+    assert CANDIDATE_WALLETS["TennisMix"].startswith("0x11e0")
+    assert CANDIDATE_WALLETS["SoccerTaker"].startswith("0x2ce9")
+    mimic = {label for label, _ in labeled_targets()}
+    archived = {label for label, _ in archive_targets()}
+    assert mimic == set(KNOWN_WALLETS)
+    assert archived == set(KNOWN_WALLETS) | set(CANDIDATE_WALLETS)
+    only_mix = resolve_archive_targets(["TennisMix", "soccertaker"])
+    assert [label for label, _ in only_mix] == ["TennisMix", "SoccerTaker"]
+    try:
+        resolve_archive_targets(["not-a-wallet"])
+        raise AssertionError("expected unknown wallet")
+    except ValueError as exc:
+        assert "not-a-wallet" in str(exc)
 
 
 def test_odds_buckets() -> None:

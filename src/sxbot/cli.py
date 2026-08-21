@@ -60,11 +60,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     archive = sub.add_parser(
         "archive",
-        help="Pull V2 fill history for labeled wallets into SQLite (winter + summer windows)",
+        help="Pull V2 fill history for known + candidate wallets into SQLite (winter + summer windows)",
     )
     archive.add_argument("--pages", type=int, default=80, help="Max pages per wallet/role/window (100 fills each)")
     archive.add_argument("--from", dest="since", default=None, help="YYYY-MM-DD single window start")
     archive.add_argument("--to", dest="until", default=None, help="YYYY-MM-DD single window end")
+    archive.add_argument(
+        "--wallet",
+        action="append",
+        default=[],
+        help="Label or address to archive (repeatable). Default: known four plus research candidates",
+    )
     sub.add_parser(
         "profiles",
         help="Print strategy profiles from sxbot-history.sqlite (run archive first)",
@@ -279,7 +285,13 @@ def cmd_sharp(client: SxClient, settings: Settings) -> int:
 
 def cmd_archive(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:
     from sxbot.archive import HistoryStore, ingest, parse_day
+    from sxbot.wallets import resolve_archive_targets
 
+    try:
+        targets = resolve_archive_targets(args.wallet, settings)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        return 2
     windows = None
     if args.since:
         windows = [
@@ -289,14 +301,16 @@ def cmd_archive(client: SxClient, settings: Settings, args: argparse.Namespace) 
                 "custom",
             )
         ]
+    labels = ", ".join(label for label, _ in targets)
     print(
-        f"archiving labeled wallets → {settings.archive_path}  "
+        f"archiving {labels} → {settings.archive_path}  "
         f"(pages={args.pages} per role/window; tennis included in later profiles)"
     )
     with HistoryStore(settings.archive_path) as store:
         summary = ingest(
             client,
             store,
+            targets=targets,
             windows=windows,
             pages=args.pages,
             progress=sys.stdout,

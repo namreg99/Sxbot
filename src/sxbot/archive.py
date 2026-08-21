@@ -22,7 +22,7 @@ from typing import Any, Iterable
 from sxbot.api import SxClient
 from sxbot.fingerprint import role_from_counts, suggested_style, trade_pnl_usdc
 from sxbot.units import decimal_odds, to_prob, to_usdc
-from sxbot.wallets import WATCH_SPORT_IDS, labeled_targets, WALLET_NOTES
+from sxbot.wallets import WATCH_SPORT_IDS, archive_targets, WALLET_NOTES
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS wallets (
@@ -391,7 +391,7 @@ def ingest(
     roles: tuple[bool, ...] = (False, True),
     progress: Any | None = None,
 ) -> dict[str, Any]:
-    targets = targets or labeled_targets()
+    targets = targets or archive_targets()
     windows = windows or default_windows()
     log = progress.write if progress is not None else (lambda *_: None)
 
