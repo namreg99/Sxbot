@@ -17,6 +17,18 @@ def _bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _addrs(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:
+    raw = os.getenv(name)
+    if not raw or not raw.strip():
+        return default
+    out: list[str] = []
+    for part in raw.split(","):
+        addr = part.strip()
+        if addr:
+            out.append(addr.lower())
+    return tuple(out)
+
+
 def _ints(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
     raw = os.getenv(name)
     if not raw or not raw.strip():
@@ -54,6 +66,9 @@ class Settings:
     user_agent: str = "sxbot/0.1"
     watch_live: bool = True
     book_source: str = "auto"
+    follow_style: str = "join"
+    sharp_wallets: tuple[str, ...] = ()
+    sharp_log: str = "sxbot-sharp.jsonl"
 
     @classmethod
     def load(cls) -> Settings:
@@ -88,6 +103,9 @@ class Settings:
             min_steam_hits=int(os.getenv("SX_MIN_STEAM_HITS", "2")),
             watch_live=_bool("SX_WATCH_LIVE", True),
             book_source=os.getenv("SX_BOOK_SOURCE", "auto").strip().lower() or "auto",
+            follow_style=(os.getenv("SX_FOLLOW_STYLE", "join").strip().lower() or "join"),
+            sharp_wallets=_addrs("SX_SHARP_WALLETS"),
+            sharp_log=os.getenv("SX_SHARP_LOG", "sxbot-sharp.jsonl"),
         )
 
     @property

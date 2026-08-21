@@ -74,6 +74,25 @@ def test_one_sided_book_no_signal() -> None:
     assert _signals(prev, curr) == []
 
 
+def test_take_style_hits_steam_instead_of_joining() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    signals = _signals(prev, curr, follow_style="take")
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].side is Side.OUTCOME_ONE
+    # Hit leftover O2 @ 46% → betting O1 at 54%.
+    assert signals[0].maker_odds == from_percent(54.0)
+
+
+def test_mixed_style_still_joins_lower_confidence_lag() -> None:
+    prev = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="2")
+    signals = _signals(prev, curr, follow_style="mixed")
+    assert signals
+    assert signals[0].action is Action.JOIN_MAKER
+
+
 def test_older_version_is_ignored() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="9")
     curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="8")

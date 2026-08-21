@@ -9,6 +9,7 @@ from sxbot.api import SxApiError, SxClient
 from sxbot.bot import Bot, describe_book, print_scan
 from sxbot.config import Settings
 from sxbot.flow import Motive
+from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
 from sxbot.journal import load_jsonl, print_summary
 from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
@@ -41,6 +42,10 @@ def main(argv: list[str] | None = None) -> int:
         "grade",
         help="Score paper bets after games are reported (assumes fills; not a historical book backtest)",
     )
+    sub.add_parser(
+        "sharp",
+        help="Fingerprint SX_SHARP_WALLETS (V2 only) — maker vs taker habits that survive V3",
+    )
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -60,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_doctor(client, settings)
             if args.cmd == "grade":
                 return cmd_grade(client, settings)
+            if args.cmd == "sharp":
+                return cmd_sharp(client, settings)
             bot = Bot(settings, client)
             if args.cmd == "scan":
                 return cmd_scan(bot, args.limit)
@@ -108,6 +115,8 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
     print(f"ladder step   {meta.odds_ladder_step_size} x 1e15  ({meta.odds_ladder_step_size / 1000:.3f}%)")
     print(f"min order     {meta.min_order} base units")
     print(f"dry_run       {settings.dry_run}")
+    print(f"follow_style  {settings.follow_style}")
+    print(f"sharp wallets {len(settings.sharp_wallets)}")
     print(f"watch_live    {settings.watch_live}  allow_live_trades={settings.allow_live}")
     sports = client.sports()
     print(f"sports        {len(sports)}")
@@ -167,6 +176,38 @@ def cmd_grade(client: SxClient, settings: Settings) -> int:
     found = client.find_markets(hashes) if hashes else []
     markets = {str(row.get("marketHash") or ""): row for row in found}
     print(format_grade(grade_paper(rows, markets, decimals=6)))
+    return 0
+
+
+def cmd_sharp(client: SxClient, settings: Settings) -> int:
+    if not settings.sharp_wallets:
+        print(format_profiles([]))
+        return 0
+    profiles = []
+    for address in settings.sharp_wallets:
+        maker_fills = client.v2_trades_for_bettor(address, as_maker=True)
+        taker_fills = client.v2_trades_for_bettor(address, as_maker=False)
+        open_orders = client.v2_orders_for_maker(address)
+        hashes = list(
+            dict.fromkeys(
+                [str(row.get("marketHash") or "") for row in open_orders]
+                + [str(row.get("marketHash") or "") for row in maker_fills[:20]]
+                + [str(row.get("marketHash") or "") for row in taker_fills[:20]]
+            )
+        )
+        hashes = [h for h in hashes if h][:30]
+        found = client.find_markets(hashes) if hashes else []
+        markets = {str(row.get("marketHash") or ""): row for row in found}
+        profiles.append(
+            profile_wallet(
+                address,
+                maker_fills=maker_fills,
+                taker_fills=taker_fills,
+                open_orders=open_orders,
+                markets=markets,
+            )
+        )
+    print(format_profiles(profiles))
     return 0
 
 

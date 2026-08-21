@@ -10,4 +10,5 @@ build/
 htmlcov/
 sxbot-paper.jsonl
 sxbot-flow.jsonl
+sxbot-sharp.jsonl
 .DS_Store

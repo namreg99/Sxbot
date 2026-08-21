@@ -64,6 +64,7 @@ sxbot flow            # classify steam / rotation / lag / taker / crossed
 sxbot run             # paper-trade loop (writes jsonl)
 sxbot summary         # what has been recorded so far
 sxbot grade           # after games finish: did those paper quotes win?
+sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
 ```
 
 `sxbot flow --once` and `sxbot run --once` do two polls then exit.
@@ -97,6 +98,8 @@ See `.env.example`. The knobs that matter:
 | `SX_JOIN_TICKS_BEHIND` | Rest behind the lead MM instead of penny-jumping them |
 | `SX_STAKE_USDC` | Size per join/take. Mainnet minimum is currently 5 USDC |
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
+| `SX_FOLLOW_STYLE` | `join` (sit behind makers), `take` (hit now), `mixed` (take strong steam, else join) |
+| `SX_SHARP_WALLETS` | Known sharp addresses. V2 only. Used by `sxbot sharp` to learn habits before V3 |
 | `SX_BOOK_SOURCE` | `auto` (V2 on mainnet until cutover), or force `v2` / `v3` |
 
 ## How sharp money is recovered without wallets
@@ -109,7 +112,11 @@ See `.env.example`. The knobs that matter:
 | Size disappears at the best **and** the tape printed | A taker lifted offers | Ignore — do not copy takers |
 | Leftover quotes sitting through the new mid (crossed book) | Stale size after a steam | Take it — that *is* betting with the makers |
 
-`sxbot flow` prints that classification live. `sxbot run` only papers the first four rows when they agree.
+`sxbot flow` prints that classification live. `sxbot run` papers maker-driven motives. `SX_FOLLOW_STYLE=take` hits the informed side immediately instead of resting; `mixed` takes only on strong steam/rotation.
+
+## Fingerprinting wallets before V3
+
+Known profitable addresses are useful until **August 25**, then they vanish from the public API. Put them in `SX_SHARP_WALLETS` and run `sxbot sharp`. That does **not** copy-trade them. It answers the only question that still matters after V3: are they mostly **makers** (join), **takers** (hit now), or **mixed** — and in which sports. The bot then follows that *habit* on anonymous books.
 
 ## How a signal is built
 

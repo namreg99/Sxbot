@@ -179,6 +179,52 @@ class SxClient:
             orders, version=version, market_hashes=market_hashes
         )
 
+    def v2_orders_for_maker(self, maker: str, *, per_page: int = 100) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        page = 0
+        while page < 10:
+            data = self._get(
+                "/orders",
+                params={"maker": maker, "perPage": per_page, "page": page},
+            )
+            rows = _as_order_rows(data)
+            out.extend(rows)
+            if len(rows) < per_page:
+                break
+            page += 1
+        return out
+
+    def v2_trades_for_bettor(
+        self,
+        bettor: str,
+        *,
+        as_maker: bool,
+        per_page: int = 50,
+        pages: int = 2,
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        next_key: str | None = None
+        for _ in range(pages):
+            params: dict[str, Any] = {
+                "bettor": bettor,
+                "maker": "true" if as_maker else "false",
+                "perPage": per_page,
+            }
+            if next_key:
+                params["nextKey"] = next_key
+            data = self._get("/trades", params)
+            if isinstance(data, dict):
+                out.extend(data.get("trades") or [])
+                next_key = data.get("nextKey")
+            elif isinstance(data, list):
+                out.extend(data)
+                next_key = None
+            else:
+                break
+            if not next_key:
+                break
+        return out
+
     def find_markets(self, market_hashes: list[str]) -> list[dict[str, Any]]:
         """Active or settled markets by hash. Up to 30 hashes per request."""
         out: list[dict[str, Any]] = []

@@ -1,14 +1,9 @@
-"""Follow informed market-maker flow instead of copy-trading wallets.
+"""Turn classified flow into join (maker) and/or take (taker) actions.
 
-SX Bet V3 hides maker/taker addresses on the public tape and aggregates the
-book into anonymous price levels. Wallet copy-trading is no longer possible
-from the public API.
-
-Sharp flow is recovered from book microstructure — see sxbot.flow — and
-turned into two actions:
-
-1. take_stale — IOC leftover quotes sitting through the new mid.
-2. join_maker — rest GTC one tick behind the new best on the informed side.
+SX_FOLLOW_STYLE:
+- join  — rest behind makers (default). Still take leftover crossed quotes.
+- take  — hit the informed side now (pay the spread, get the position).
+- mixed — take on strong steam/rotation; otherwise join.
 """
 
 from __future__ import annotations
@@ -37,6 +32,37 @@ def _join_odds(view: BookView, side: Side, ladder: OddsLadder, ticks_behind: int
     return price
 
 
+def _take_against(view: BookView, side: Side) -> int | None:
+    opposite = view.best(side.opposite())
+    if opposite is None:
+        return None
+    return taker_odds(opposite)
+
+
+def _signal(
+    market: Market,
+    report: FlowReport,
+    view: BookView,
+    action: Action,
+    price: int,
+    *,
+    crossed: bool,
+) -> Signal:
+    assert report.side is not None
+    return Signal(
+        market=market,
+        side=report.side,
+        action=action,
+        maker_odds=price,
+        reason="; ".join(report.reasons) or report.motive.value,
+        mid_move_bps=report.move_bps,
+        imbalance=view.imbalance,
+        confidence=report.confidence,
+        crossed=crossed,
+        motive=report.motive.value,
+    )
+
+
 def evaluate(
     market: Market,
     prev: BookView,
@@ -51,29 +77,36 @@ def evaluate(
     if not report.actionable or report.side is None:
         return []
 
+    style = (settings.follow_style or "join").strip().lower()
     spread_bps = curr.spread_bps()
     wide_enough = spread_bps is not None and spread_bps >= settings.min_spread_bps
-    reason = "; ".join(report.reasons) or report.motive.value
     signals: list[Signal] = []
 
     if report.motive is Motive.CROSSED and settings.enable_take_stale:
-        stale_best = curr.best(report.side.opposite())
-        if stale_best is not None:
+        price = _take_against(curr, report.side)
+        if price is not None:
             signals.append(
-                Signal(
-                    market=market,
-                    side=report.side,
-                    action=Action.TAKE_STALE,
-                    maker_odds=taker_odds(stale_best),
-                    reason=reason,
-                    mid_move_bps=report.move_bps,
-                    imbalance=curr.imbalance,
-                    confidence=report.confidence,
-                    crossed=True,
-                    motive=report.motive.value,
-                )
+                _signal(market, report, curr, Action.TAKE_STALE, price, crossed=True)
             )
             return signals
+
+    take_now = settings.enable_take_stale and report.motive in {
+        Motive.MAKER_STEAM,
+        Motive.SIZE_ROTATION,
+    } and (
+        style == "take"
+        or (style == "mixed" and report.confidence >= 0.7)
+    )
+    if take_now:
+        price = _take_against(curr, report.side)
+        if price is not None:
+            signals.append(
+                _signal(market, report, curr, Action.TAKE_FLOW, price, crossed=curr.crossed)
+            )
+            return signals
+
+    if style == "take":
+        return signals
 
     if settings.enable_join_maker and (
         wide_enough or report.motive in {Motive.MAKER_STEAM, Motive.TOB_LAG, Motive.SIZE_ROTATION}
@@ -81,17 +114,6 @@ def evaluate(
         price = _join_odds(curr, report.side, ladder, settings.join_ticks_behind)
         if price is not None:
             signals.append(
-                Signal(
-                    market=market,
-                    side=report.side,
-                    action=Action.JOIN_MAKER,
-                    maker_odds=price,
-                    reason=reason,
-                    mid_move_bps=report.move_bps,
-                    imbalance=curr.imbalance,
-                    confidence=report.confidence,
-                    crossed=curr.crossed,
-                    motive=report.motive.value,
-                )
+                _signal(market, report, curr, Action.JOIN_MAKER, price, crossed=curr.crossed)
             )
     return signals
