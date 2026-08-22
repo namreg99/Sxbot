@@ -17,6 +17,7 @@ from typing import Any
 
 from sxbot.api import SxClient
 from sxbot.config import Settings
+from sxbot.filters import order_skip_reason
 from sxbot.executor import Executor
 from sxbot.journal import load_jsonl
 from sxbot.models import Action, Market, Signal, Side
@@ -51,6 +52,9 @@ def should_copy_taker(
         return False, f"longshot {dec:.2f} > {settings.mimic_max_decimal}"
     if market is None:
         return False, "missing market"
+    skip = order_skip_reason(market, settings)
+    if skip:
+        return False, skip
     if settings.sport_ids and market.sport_id not in settings.sport_ids:
         return False, f"sport {market.sport_id} not in universe"
     if market.is_live() and not settings.allow_live:

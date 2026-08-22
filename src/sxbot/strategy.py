@@ -9,6 +9,7 @@ SX_FOLLOW_STYLE:
 from __future__ import annotations
 
 from sxbot.config import Settings
+from sxbot.filters import order_skip_reason
 from sxbot.flow import FlowReport, Motive, classify
 from sxbot.models import Action, Market, PublicTrade, Signal, Side
 from sxbot.orderbook import BookView
@@ -73,6 +74,8 @@ def evaluate(
     steam_hits: int = 0,
     report: FlowReport | None = None,
 ) -> list[Signal]:
+    if order_skip_reason(market, settings):
+        return []
     report = report or classify(prev, curr, settings, trades=trades, steam_hits=steam_hits)
     if not report.actionable or report.side is None:
         return []
@@ -108,8 +111,11 @@ def evaluate(
     if style == "take":
         return signals
 
-    if settings.enable_join_maker and (
-        wide_enough or report.motive in {Motive.MAKER_STEAM, Motive.TOB_LAG, Motive.SIZE_ROTATION}
+    join_motives = {Motive.MAKER_STEAM, Motive.SIZE_ROTATION}
+    if settings.join_tob_lag:
+        join_motives.add(Motive.TOB_LAG)
+    if settings.enable_join_maker and report.motive in join_motives and (
+        wide_enough or report.motive is not Motive.TOB_LAG
     ):
         price = _join_odds(curr, report.side, ladder, settings.join_ticks_behind)
         if price is not None:

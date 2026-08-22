@@ -55,14 +55,24 @@ class SxClient:
     def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         delay = 2.0
         last: httpx.Response | None = None
+        last_exc: Exception | None = None
         for _ in range(8):
-            response = self._http.get(path, params=params)
+            try:
+                response = self._http.get(path, params=params)
+            except (httpx.TimeoutException, httpx.TransportError) as exc:
+                last_exc = exc
+                time.sleep(delay)
+                delay = min(delay * 2, 45.0)
+                continue
             last = response
+            last_exc = None
             if response.status_code == 429:
                 time.sleep(delay)
                 delay = min(delay * 2, 45.0)
                 continue
             return self._parse(response)
+        if last_exc is not None:
+            raise last_exc
         assert last is not None
         raise SxApiError(last.status_code, str(last.request.url), last.text)
 

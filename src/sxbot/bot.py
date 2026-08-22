@@ -175,6 +175,9 @@ class Bot:
 
     def step(self) -> int:
         self._maybe_heartbeat()
+        freed = self.risk.release_finished(int(time.time()))
+        if freed:
+            log.info("freed %s open slot(s) after kickoff/TTL", len(freed))
         executed = 0
         markets = self.qualifying_markets()
         tape = self.pull_tape(markets)
@@ -206,10 +209,16 @@ class Bot:
         )
         try:
             while True:
-                n = self.step()
-                if n:
-                    log.info("executed %s signal(s) this poll", n)
-                time.sleep(self.settings.poll_seconds)
+                try:
+                    n = self.step()
+                    if n:
+                        log.info("executed %s signal(s) this poll", n)
+                    time.sleep(self.settings.poll_seconds)
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
+                    log.exception("poll failed; retrying (paper loop stays up)")
+                    time.sleep(max(self.settings.poll_seconds, 8.0))
         except KeyboardInterrupt:
             log.info("shutting down")
             if not self.settings.dry_run:

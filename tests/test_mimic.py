@@ -36,6 +36,20 @@ def test_live_blocked_until_allow_live() -> None:
     assert "live" in why
 
 
+def test_skips_soccer_totals() -> None:
+    market = make_market(
+        sport_id=5,
+        sport_label="Soccer",
+        type=28,
+        outcome_one="Over 3.5",
+        outcome_two="Under 3.5",
+    )
+    settings = make_settings(sport_ids=(5,), skip_totals=True)
+    ok, why = should_copy_taker(_raw(58.75), market, settings)
+    assert ok is False
+    assert why == "totals"
+
+
 def test_wrong_sport_skipped() -> None:
     market = make_market(sport_id=14, sport_label="Crypto")
     settings = make_settings(sport_ids=(8, 1, 3, 2, 5, 6))

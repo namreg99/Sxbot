@@ -85,12 +85,51 @@ def test_take_style_hits_steam_instead_of_joining() -> None:
     assert signals[0].maker_odds == from_percent(54.0)
 
 
-def test_mixed_style_still_joins_lower_confidence_lag() -> None:
+def test_mixed_style_skips_tob_lag_unless_enabled() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="2")
-    signals = _signals(prev, curr, follow_style="mixed")
+    assert _signals(prev, curr, follow_style="mixed") == []
+    signals = _signals(prev, curr, follow_style="mixed", join_tob_lag=True)
     assert signals
     assert signals[0].action is Action.JOIN_MAKER
+
+
+def test_skips_totals_even_on_steam() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    market = make_market(type=28, outcome_one="Over 2.5", outcome_two="Under 2.5")
+    from sxbot.orderbook import analyze
+    from sxbot.strategy import evaluate
+    from sxbot.units import OddsLadder
+    from tests.conftest import make_settings
+
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def test_skips_not_tie() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    market = make_market(type=1, outcome_one="Tie", outcome_two="Not tie")
+    from sxbot.orderbook import analyze
+    from sxbot.strategy import evaluate
+    from sxbot.units import OddsLadder
+    from tests.conftest import make_settings
+
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals == []
 
 
 def test_older_version_is_ignored() -> None:

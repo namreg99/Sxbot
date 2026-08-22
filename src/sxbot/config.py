@@ -7,7 +7,9 @@ from dotenv import load_dotenv
 
 from sxbot.rollout import MAINNET_API, TESTNET_API
 
-DEFAULT_MARKET_TYPES = (226, 52, 342, 3, 28, 2)
+# 1 = soccer 2-way (Team / Not Team). 226 = MLB ML. 52 = team vs team.
+# 342/3 = spreads. Totals (2, 28) stay out of the default order universe.
+DEFAULT_MARKET_TYPES = (1, 226, 52, 342, 3)
 # Football, basketball, baseball, hockey, soccer, tennis.
 DEFAULT_SPORT_IDS = (8, 1, 3, 2, 5, 6)
 
@@ -75,6 +77,11 @@ class Settings:
     mimic_max_decimal: float = 3.5
     mimic_copy_makers: bool = True
     mimic_log: str = "sxbot-mimic.jsonl"
+    skip_totals: bool = True
+    skip_not_tie: bool = True
+    join_tob_lag: bool = False
+    one_side_per_market: bool = True
+    paper_slot_seconds: float = 7200.0
 
     @classmethod
     def load(cls) -> Settings:
@@ -116,6 +123,11 @@ class Settings:
             mimic_max_decimal=float(os.getenv("SX_MIMIC_MAX_DECIMAL", "3.5")),
             mimic_copy_makers=_bool("SX_MIMIC_COPY_MAKERS", True),
             mimic_log=os.getenv("SX_MIMIC_LOG", "sxbot-mimic.jsonl"),
+            skip_totals=_bool("SX_SKIP_TOTALS", True),
+            skip_not_tie=_bool("SX_SKIP_NOT_TIE", True),
+            join_tob_lag=_bool("SX_JOIN_TOB_LAG", False),
+            one_side_per_market=_bool("SX_ONE_SIDE_PER_MARKET", True),
+            paper_slot_seconds=float(os.getenv("SX_PAPER_SLOT_SECONDS", "7200")),
         )
 
     @property
