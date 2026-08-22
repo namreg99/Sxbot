@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from sxbot.config import Settings
 from sxbot.models import Market
+from sxbot.units import decimal_odds, to_prob
 
 TOTAL_TYPES = {2, 28, 236}
 
@@ -23,4 +24,14 @@ def order_skip_reason(market: Market, settings: Settings) -> str | None:
         "not tie" in o1 or "not tie" in o2 or o1 in {"tie", "not tie"} or o2 in {"tie", "not tie"}
     ):
         return "not-tie"
+    return None
+
+
+def longshot_skip_reason(price: int, settings: Settings) -> str | None:
+    cap = float(settings.max_order_decimal or 0)
+    if cap <= 0 or price <= 0:
+        return None
+    dec = decimal_odds(to_prob(price))
+    if dec > cap:
+        return f"longshot {dec:.2f} > {cap}"
     return None

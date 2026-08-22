@@ -9,7 +9,7 @@ SX_FOLLOW_STYLE:
 from __future__ import annotations
 
 from sxbot.config import Settings
-from sxbot.filters import order_skip_reason
+from sxbot.filters import longshot_skip_reason, order_skip_reason
 from sxbot.flow import FlowReport, Motive, classify
 from sxbot.models import Action, Market, PublicTrade, Signal, Side
 from sxbot.orderbook import BookView
@@ -87,7 +87,7 @@ def evaluate(
 
     if report.motive is Motive.CROSSED and settings.enable_take_stale:
         price = _take_against(curr, report.side)
-        if price is not None:
+        if price is not None and not longshot_skip_reason(price, settings):
             signals.append(
                 _signal(market, report, curr, Action.TAKE_STALE, price, crossed=True)
             )
@@ -102,7 +102,7 @@ def evaluate(
     )
     if take_now:
         price = _take_against(curr, report.side)
-        if price is not None:
+        if price is not None and not longshot_skip_reason(price, settings):
             signals.append(
                 _signal(market, report, curr, Action.TAKE_FLOW, price, crossed=curr.crossed)
             )
@@ -118,7 +118,7 @@ def evaluate(
         wide_enough or report.motive is not Motive.TOB_LAG
     ):
         price = _join_odds(curr, report.side, ladder, settings.join_ticks_behind)
-        if price is not None:
+        if price is not None and not longshot_skip_reason(price, settings):
             signals.append(
                 _signal(market, report, curr, Action.JOIN_MAKER, price, crossed=curr.crossed)
             )

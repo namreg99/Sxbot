@@ -82,6 +82,7 @@ class Settings:
     join_tob_lag: bool = False
     one_side_per_market: bool = True
     paper_slot_seconds: float = 7200.0
+    max_order_decimal: float = 3.5
 
     @classmethod
     def load(cls) -> Settings:
@@ -128,6 +129,7 @@ class Settings:
             join_tob_lag=_bool("SX_JOIN_TOB_LAG", False),
             one_side_per_market=_bool("SX_ONE_SIDE_PER_MARKET", True),
             paper_slot_seconds=float(os.getenv("SX_PAPER_SLOT_SECONDS", "7200")),
+            max_order_decimal=float(os.getenv("SX_MAX_ORDER_DECIMAL", "3.5")),
         )
 
     @property

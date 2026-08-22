@@ -113,6 +113,16 @@ def test_skips_totals_even_on_steam() -> None:
     assert signals == []
 
 
+def test_skips_longshot_steam() -> None:
+    prev = make_book(o1=((18.0, 10),), o2=((80.0, 10),), version="1")
+    curr = make_book(o1=((22.0, 10),), o2=((76.0, 10),), version="2")
+    signals = _signals(prev, curr)
+    assert signals == []
+    kept = _signals(prev, curr, max_order_decimal=6.0)
+    assert kept
+    assert kept[0].action is Action.JOIN_MAKER
+
+
 def test_skips_not_tie() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
