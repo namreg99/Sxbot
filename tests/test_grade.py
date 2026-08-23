@@ -39,6 +39,32 @@ def test_lose_and_void_and_pending() -> None:
 def test_outcome_two_win() -> None:
     bet = grade_row(_paper(side="outcome_two"), {"outcome": 2, "outcomeTwoName": "49ers"})
     assert bet.result == "win"
+    assert bet.picked == "49ers"
+
+
+def test_format_grade_names_the_picked_side() -> None:
+    bets = grade_paper(
+        [_paper(side="outcome_two", label="Dodgers / Pirates")],
+        {"0xabc": {"outcome": 1, "outcomeOneName": "Dodgers", "outcomeTwoName": "Pirates",
+                   "teamOneScore": 4, "teamTwoScore": 3}},
+    )
+    text = format_grade(bets)
+    assert "picked Pirates" in text
+    assert "LOSE" in text
+
+
+def test_picked_uses_paper_row_when_market_omits_names() -> None:
+    bet = grade_row(
+        _paper(
+            side="outcome_two",
+            label="Los Angeles Dodgers / Pittsburgh Pirates",
+            outcome_one="Los Angeles Dodgers",
+            outcome_two="Pittsburgh Pirates",
+        ),
+        {"outcome": 1},
+    )
+    assert bet.result == "lose"
+    assert bet.picked == "Pittsburgh Pirates"
 
 
 def test_format_grade_pending_copy() -> None:

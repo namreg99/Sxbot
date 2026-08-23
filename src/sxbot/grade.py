@@ -37,6 +37,7 @@ class GradedBet:
     game_time: int
     score: str | None = None
     reported_at: int | None = None
+    picked: str | None = None
 
 
 def _kickoff(game_time: int) -> str:
@@ -68,6 +69,36 @@ def _waiting_note(game_time: int, *, now: int | None = None) -> str:
     return f"{when}  (started {elapsed // 3600}h ago; SX not reported yet)"
 
 
+def _picked_name(
+    row: dict[str, Any],
+    market: dict[str, Any] | None,
+    side: str,
+    label: str,
+) -> str | None:
+    """Name the side we quoted, not the first team in the market label."""
+    if side == "outcome_one":
+        for value in (
+            (market or {}).get("outcomeOneName"),
+            row.get("outcome_one"),
+        ):
+            name = str(value or "").strip()
+            if name:
+                return name
+        parts = [p.strip() for p in label.split(" / ") if p.strip()]
+        return parts[0] if parts else None
+    if side == "outcome_two":
+        for value in (
+            (market or {}).get("outcomeTwoName"),
+            row.get("outcome_two"),
+        ):
+            name = str(value or "").strip()
+            if name:
+                return name
+        parts = [p.strip() for p in label.split(" / ") if p.strip()]
+        return parts[1] if len(parts) > 1 else None
+    return None
+
+
 def _result_for(side: str, outcome: int | None) -> str:
     if outcome is None:
         return "pending"
@@ -90,6 +121,7 @@ def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: i
     stake_usdc = float(row.get("stake_usdc") or to_usdc(stake, decimals))
     odds_pct = float(row.get("odds_pct") or 0)
     game_time = int((market or {}).get("gameTime") or row.get("game_time") or 0)
+    picked = _picked_name(row, market, side, label)
     if market is None:
         return GradedBet(
             label=label,
@@ -103,6 +135,7 @@ def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: i
             pnl_usdc=None,
             winner=None,
             game_time=game_time,
+            picked=picked,
         )
     outcome = _as_outcome(market.get("outcome"))
     winner = None
@@ -139,6 +172,7 @@ def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: i
         game_time=game_time,
         score=score,
         reported_at=reported_at,
+        picked=picked,
     )
 
 
@@ -233,8 +267,9 @@ def format_grade(bets: list[GradedBet], *, now: int | None = None) -> str:
             mark = {"win": "WIN ", "lose": "LOSE", "void": "VOID"}[bet.result]
             extra = f"  {bet.score}" if bet.score else ""
             pnl_s = f"{bet.pnl_usdc:+.2f}" if bet.pnl_usdc is not None else "n/a"
+            pick = bet.picked or bet.side
             lines.append(
-                f"  {mark} {pnl_s:>8}  {bet.label[:36]:<36}  "
-                f"{bet.side} @ {bet.odds_pct}%  {bet.motive}{extra}"
+                f"  {mark} {pnl_s:>8}  picked {pick[:28]:<28}  "
+                f"{bet.label[:32]}  @ {bet.odds_pct}%  {bet.motive}{extra}"
             )
     return "\n".join(lines)
