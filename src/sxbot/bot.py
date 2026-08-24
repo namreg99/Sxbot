@@ -15,6 +15,7 @@ from sxbot.config import Settings
 from sxbot.executor import Executor
 from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, quote_family
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
+from sxbot.kelly import TAKE_ACTIONS
 from sxbot.journal import load_all_paper
 from sxbot.models import Action, Book, Market, PublicTrade, Side, Signal
 from sxbot.orderbook import BookView, analyze, format_view
@@ -224,12 +225,31 @@ class Bot:
             for signal in evaluate(
                 market, prev, view, self.settings, self.ladder, report=report
             ):
-                reason = self.risk.allow(signal)
+                stake = self.risk.stake_for(signal)
+                if stake is None:
+                    log.info(
+                        "skip %s %s: no Kelly edge vs fair %.3f%%",
+                        signal.action.value,
+                        market.label,
+                        to_percent(signal.fair_odds) if signal.fair_odds else 0.0,
+                    )
+                    continue
+                stake = max(stake, self.meta.min_order) if signal.action not in TAKE_ACTIONS else stake
+                if signal.action in TAKE_ACTIONS and stake < self.meta.min_order:
+                    log.info("skip %s %s: Kelly size below min order", signal.action.value, market.label)
+                    continue
+                reason = self.risk.allow(signal, stake=stake)
                 if reason:
                     log.info("skip %s %s: %s", signal.action.value, market.label, reason)
                     continue
-                stake = max(self.risk.stake(), self.meta.min_order)
-                self.executor.execute(signal, stake)
+                extra = {}
+                if signal.action in TAKE_ACTIONS:
+                    extra = {
+                        "fair_pct": to_percent(signal.fair_odds) if signal.fair_odds else None,
+                        "kelly_fraction": self.settings.kelly_fraction,
+                        "bankroll_usdc": self.settings.bankroll_usdc,
+                    }
+                self.executor.execute(signal, stake, extra=extra or None)
                 self.risk.record(signal, stake)
                 executed += 1
         return executed

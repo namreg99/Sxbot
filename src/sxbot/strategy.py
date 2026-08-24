@@ -13,7 +13,7 @@ from sxbot.filters import longshot_skip_reason, order_skip_reason, quote_style
 from sxbot.flow import FlowReport, Motive, classify
 from sxbot.models import Action, Market, PublicTrade, Signal, Side
 from sxbot.orderbook import BookView
-from sxbot.units import OddsLadder, taker_odds
+from sxbot.units import ODDS_SCALE, OddsLadder, taker_odds
 
 
 def _join_odds(view: BookView, side: Side, ladder: OddsLadder, ticks_behind: int) -> int | None:
@@ -51,6 +51,9 @@ def _signal(
     style: str,
 ) -> Signal:
     assert report.side is not None
+    fair = 0
+    if view.mid_one is not None:
+        fair = view.mid_one if report.side is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
     return Signal(
         market=market,
         side=report.side,
@@ -63,6 +66,7 @@ def _signal(
         crossed=crossed,
         motive=report.motive.value,
         style=style,
+        fair_odds=fair,
     )
 
 

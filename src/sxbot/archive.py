@@ -698,3 +698,94 @@ def format_style_profiles(profiles: list[StyleProfile]) -> str:
             "SX_FOLLOW_STYLE=take is the Gary/Botswana habit on anonymous books."
         )
     return "\n".join(lines).rstrip()
+
+
+def format_maker_roi(store: HistoryStore) -> str:
+    """Rank labeled wallets that mostly make, by settled fill ROI.
+
+    Fill P&L omits SX maker-reward USDC, so a working MM can look slightly red.
+    """
+    wallets = list(store._db.execute("SELECT address, label FROM wallets"))
+    if not wallets:
+        return "No archived wallets. Run `sxbot archive` first."
+    markets = {
+        r["market_hash"]: r for r in store._db.execute("SELECT market_hash, sport_label, game_time FROM markets")
+    }
+    lines = [
+        "Maker-side fill ROI from sxbot-history.sqlite.",
+        "ROI = settled fill P&L / stake. This omits maker-reward USDC.",
+        "Unlabeled counterparties are not in this DB — only the six labeled wallets.",
+        "",
+        f"{'wallet':16} {'maker%':>7} {'n':>6} {'stake':>10} {'pnl':>10} {'ROI%':>7}",
+    ]
+    ranked: list[tuple[float, str, int, float, float, float]] = []
+    for w in wallets:
+        addr = w["address"]
+        label = w["label"]
+        fills = list(
+            store._db.execute(
+                "SELECT * FROM fills WHERE wallet=? AND settled=1",
+                (addr,),
+            )
+        )
+        if not fills:
+            continue
+        maker = [r for r in fills if r["is_maker"]]
+        share = len(maker) / len(fills)
+        if not maker:
+            continue
+        stake = sum(int(r["stake"] or 0) for r in maker) / 1e6
+        pnl = sum(float(r["pnl_usdc"] or 0) for r in maker)
+        roi = (pnl / stake) if stake else 0.0
+        ranked.append((share, label, len(maker), stake, pnl, roi))
+    ranked.sort(key=lambda row: (-row[0], -row[5]))
+    for share, label, n, stake, pnl, roi in ranked:
+        lines.append(
+            f"{label:16} {share:6.0%} {n:6d} {stake:10,.0f} {pnl:+10,.0f} {roi*100:7.1f}"
+        )
+    lines.append("")
+    lines.append("Slices that actually printed (maker fills, stake ≥ $20k):")
+    slices: list[tuple[float, str]] = []
+    for w in wallets:
+        fills = list(
+            store._db.execute(
+                "SELECT * FROM fills WHERE wallet=? AND settled=1 AND is_maker=1",
+                (w["address"],),
+            )
+        )
+        buckets: dict[tuple[str, str], list[sqlite3.Row]] = defaultdict(list)
+        for r in fills:
+            m = markets.get(r["market_hash"])
+            sport = str((m["sport_label"] if m else None) or "?")
+            gt = int(m["game_time"] if m else 0)
+            phase = "pregame" if gt and int(r["bet_time"] or 0) < gt else "live"
+            buckets[(phase, sport)].append(r)
+        for (phase, sport), sub in buckets.items():
+            stake = sum(int(r["stake"] or 0) for r in sub) / 1e6
+            if stake < 20_000:
+                continue
+            pnl = sum(float(r["pnl_usdc"] or 0) for r in sub)
+            roi = pnl / stake if stake else 0.0
+            if roi <= 0:
+                continue
+            slices.append(
+                (
+                    roi,
+                    f"  {w['label']:<16} {phase:<8} {sport:<12} n={len(sub):<5} "
+                    f"stake {stake:10,.0f}  pnl {pnl:+10,.0f}  ROI {roi*100:6.1f}%",
+                )
+            )
+    slices.sort(reverse=True)
+    if not slices:
+        lines.append("  none")
+    else:
+        lines.extend(row for _, row in slices[:12])
+    lines.append("")
+    lines.append(
+        "No labeled wallet is a high-ROI maker on fills overall. "
+        "cypherprod is the only maker-heavy book that is close (taker book is the plus). "
+        "HedgeHog is the two-sided pregame habit — fill P&L is red before rewards. "
+        "Do not copy TennisMix basketball (+ROI, small sample)."
+    )
+    return "\n".join(lines)
+

@@ -5,6 +5,7 @@ from typing import Any
 
 from sxbot.config import Settings
 from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
+from sxbot.kelly import TAKE_ACTIONS, sized_take_usdc
 from sxbot.models import Action, Exposure, Side, Signal
 from sxbot.units import to_base_units
 
@@ -25,6 +26,15 @@ class RiskGate:
 
     def stake(self) -> int:
         return to_base_units(self.settings.stake_usdc, self.decimals)
+
+    def stake_for(self, signal: Signal) -> int | None:
+        """Base-units stake, or None to skip a no-edge take."""
+        if signal.action not in TAKE_ACTIONS:
+            return self.stake()
+        sized = sized_take_usdc(self.settings, signal)
+        if sized is None:
+            return None
+        return to_base_units(sized, self.decimals)
 
     def hydrate(self, rows: list[dict[str, Any]], *, now: int | None = None) -> None:
         """Remember market+side already quoted so a restart does not restack.
@@ -83,9 +93,9 @@ class RiskGate:
             self.quoted_kickoff[market] = kickoff
             self.exposure.add(market, side_enum, self.stake())
 
-    def allow(self, signal: Signal) -> str | None:
+    def allow(self, signal: Signal, stake: int | None = None) -> str | None:
         """Return a rejection reason, or None if the signal may trade."""
-        stake = self.stake()
+        amount = stake if stake is not None else self.stake()
         max_total = to_base_units(self.settings.max_exposure_usdc, self.decimals)
         max_mkt = to_base_units(self.settings.max_per_market_usdc, self.decimals)
         market_hash = signal.market.market_hash
@@ -109,9 +119,9 @@ class RiskGate:
             return None
         if self.exposure.open_markets() >= self.settings.max_open_markets and market_hash not in self.quoted:
             return "max open markets"
-        if self.exposure.total() + stake > max_total:
+        if self.exposure.total() + amount > max_total:
             return "max total exposure"
-        if self.exposure.net(market_hash) + stake > max_mkt:
+        if self.exposure.net(market_hash) + amount > max_mkt:
             return "max per-market exposure"
         if (market_hash, signal.side.value) in self.joined_sides:
             return "already on this side"

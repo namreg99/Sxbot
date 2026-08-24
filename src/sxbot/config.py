@@ -101,6 +101,11 @@ class Settings:
     mm_max_widen_ticks: int = 6
     mm_min_overround_bps: int = 25
     mm_min_decimal: float = 1.12
+    # Paper taker Kelly. 0.625 is between half-Kelly (moderate) and 3/4 (aggressive).
+    bankroll_usdc: float = 1000.0
+    kelly_fraction: float = 0.625
+    kelly_max_frac: float = 0.05
+    kelly_on_takes: bool = True
 
     @classmethod
     def load(cls) -> Settings:
@@ -162,6 +167,10 @@ class Settings:
             mm_max_widen_ticks=int(os.getenv("SX_MM_MAX_WIDEN_TICKS", "6")),
             mm_min_overround_bps=int(os.getenv("SX_MM_MIN_OVERROUND_BPS", "25")),
             mm_min_decimal=float(os.getenv("SX_MM_MIN_DECIMAL", "1.12")),
+            bankroll_usdc=float(os.getenv("SX_BANKROLL_USDC", "1000")),
+            kelly_fraction=float(os.getenv("SX_KELLY_FRACTION", "0.625")),
+            kelly_max_frac=float(os.getenv("SX_KELLY_MAX_FRAC", "0.05")),
+            kelly_on_takes=_bool("SX_KELLY_ON_TAKES", True),
         )
 
     @property

@@ -69,6 +69,7 @@ sxbot scoreboard      # grade the SIGNAL itself vs. the price already in the boo
 sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
 sxbot archive         # pull winter + summer fill history into SQLite
 sxbot profiles        # sport / odds / live-vs-pregame style report
+sxbot makers          # labeled wallets that mostly make, ranked by fill ROI
 sxbot overlap         # V2 only: who was quoting when our classifier fired?
 sxbot mimic           # paper-copy new fills from those wallets (V2 only)
 sxbot mm              # pregame two-sided market maker (paper; own log)
@@ -119,7 +120,10 @@ See `.env.example`. The knobs that matter:
 | `SX_MIN_MID_MOVE_BPS` | How far the mid must move (100 bps = 1 implied-probability point) |
 | `SX_MIN_IMBALANCE` | Size skew that counts as makers parking money on one side |
 | `SX_JOIN_TICKS_BEHIND` | Rest behind the lead MM instead of penny-jumping them |
-| `SX_STAKE_USDC` | Size per join/take. Mainnet minimum is currently 5 USDC |
+| `SX_STAKE_USDC` | Size per join/take. Mainnet minimum is currently 5 USDC. Takes use Kelly vs this as the floor |
+| `SX_BANKROLL_USDC` | Paper bankroll for Kelly takes (default 1000) |
+| `SX_KELLY_FRACTION` | Fractional Kelly on takes. 0.50 = moderate, 0.75 = aggressive, default **0.625** mid |
+| `SX_KELLY_MAX_FRAC` | Never bet more than this share of bankroll on one take (default 5%) |
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
 | `SX_FOLLOW_STYLE` | `join` (sit behind makers), `take` (hit now), `mixed` (take strong steam, else join) |
 | `SX_MM_MAX_WIDEN_TICKS` | Pregame maker: extra ticks behind the inside until both quotes sum to < 100% |
@@ -158,6 +162,10 @@ This is a **separate** paper bot from `sxbot run`. It does not copy HedgeHog's w
 If both sides fill, the two implied probabilities sum to less than 100% — that locked overround is the maker's spread. Quotes that nobody trades through are **not** scored. `sxbot grade` only counts `mm_fill` rows, which fire when the public tape takes the opposite outcome and the best on our side has been eaten to or through our join.
 
 Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Maker-reward size (~$100, beat the orange line, rest ≥10s) is a later live problem; paper trains the quoting loop at `SX_STAKE_USDC`.
+
+## Paper taker Kelly
+
+`sxbot run` with `SX_FOLLOW_STYLE=take` sizes each take with **⅝ Kelly** (between half-Kelly and ¾ Kelly) against a **$1000 paper bankroll**. Fair probability is the book's mid — SX's public API does not send the orange/global line. A take with no edge vs that mid is skipped, not rounded up to $5. Cap is `min(5% of bankroll, SX_MAX_PER_MARKET_USDC)`. Joins stay flat at `SX_STAKE_USDC`.
 
 A ~150k-fill sample (Dec/Jan + Jun + late July, including tennis) is what `sxbot profiles` is for. In that sample: **BotswanaMC** is the only labeled wallet with large **net** P&L, mostly pregame soccer and NFL at pick’em prices (1.80–2.20). **GambleGuruGary** prints millions of gross “Won” and is still **net negative** — the 1.13 hammer is a weapon, not the book. **Tennis lost money** for both takers. **cypherprod** is mixed maker/taker and the only one who is net-positive *live*. **HedgeHog** is the two-sided MM (`sxbot mm`). Do not clone all four as one bot.
 

@@ -84,6 +84,7 @@ def test_take_style_hits_steam_instead_of_joining() -> None:
     assert signals[0].side is Side.OUTCOME_ONE
     # Hit leftover O2 @ 46% → betting O1 at 54%.
     assert signals[0].maker_odds == from_percent(54.0)
+    assert signals[0].fair_odds > 0
 
 
 def test_mixed_style_skips_tob_lag_unless_enabled() -> None:

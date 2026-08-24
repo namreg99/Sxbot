@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Print strategy profiles from sxbot-history.sqlite (run archive first)",
     )
     sub.add_parser(
+        "makers",
+        help="Rank archived wallets that mostly make, by settled fill ROI",
+    )
+    sub.add_parser(
         "overlap",
         help="V2 only: did labeled makers/takers sit on the same side our classifier flagged?",
     )
@@ -115,6 +119,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "profiles":
         return cmd_profiles(settings)
+    if args.cmd == "makers":
+        return cmd_makers(settings)
     if args.cmd == "overlap":
         print(format_overlap_report(load_jsonl(settings.flow_log)))
         return 0
@@ -371,6 +377,16 @@ def cmd_archive(client: SxClient, settings: Settings, args: argparse.Namespace) 
         f"by_wallet={summary['by_wallet']}"
     )
     print("next: sxbot profiles")
+    return 0
+
+
+def cmd_makers(settings: Settings) -> int:
+    from sxbot.archive import HistoryStore, format_maker_roi
+
+    path = settings.archive_path
+    with HistoryStore(path) as store:
+        print(format_maker_roi(store))
+        print(f"\nsource {path}")
     return 0
 
 

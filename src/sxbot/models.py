@@ -179,6 +179,7 @@ class Signal:
     crossed: bool = False
     motive: str = ""
     style: str = ""
+    fair_odds: int = 0
 
 
 @dataclass
