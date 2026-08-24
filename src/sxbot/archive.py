@@ -819,7 +819,16 @@ def format_maker_sport_bands(store: HistoryStore) -> str:
         dec = decimal_odds(to_prob(odds)) if odds else 0.0
         sport = str(r["sport_label"] or "?")
         typ = int(r["type"] or 0)
-        kind = {1: "type-1", 226: "ML", 342: "spread", 52: "ML", 3: "spread"}.get(typ, f"type-{typ}")
+        kind = {
+            1: "type-1",
+            2: "totals",
+            28: "totals",
+            226: "ML",
+            236: "totals",
+            342: "spread",
+            52: "ML",
+            3: "spread",
+        }.get(typ, f"type-{typ}")
         stake = int(r["stake"] or 0) / 1e6
         pnl = float(r["pnl_usdc"] or 0)
         buckets[(sport, kind, odds_bucket(dec) if dec else "unknown")].append((stake, pnl))
