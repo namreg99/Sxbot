@@ -18,6 +18,16 @@ def test_trades_use_pagination_key_not_next_key() -> None:
     assert "nextKey" not in params
 
 
+def test_public_tape_window_params_are_dates_only() -> None:
+    # v2_public_trades must not send a bettor filter — that would hide 5k+ names.
+    from inspect import signature
+    from sxbot.api import SxClient
+
+    sig = signature(SxClient.v2_public_trades)
+    assert "start_date" in sig.parameters
+    assert "bettor" not in sig.parameters
+
+
 def test_maker_flag_and_omitted_cursor() -> None:
     params = v2_trade_query_params("0xabc", as_maker=True)
     assert params["maker"] == "true"

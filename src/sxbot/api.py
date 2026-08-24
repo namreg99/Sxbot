@@ -273,6 +273,47 @@ class SxClient:
             time.sleep(0.25)
         return out
 
+    def v2_public_trades(
+        self,
+        *,
+        start_date: int,
+        end_date: int,
+        per_page: int = 100,
+        max_pages: int = 40,
+    ) -> list[dict[str, Any]]:
+        """Anonymous V2 tape for a time window. Oldest-first; paginate to the end.
+
+        `endDate` in the future returns HTTP 400. Cap it at *now* yourself.
+        A page cap on a busy window misses the *recent* fills.
+        """
+        out: list[dict[str, Any]] = []
+        pagination_key: str | None = None
+        seen: set[str] = set()
+        for _ in range(max(1, max_pages)):
+            params: dict[str, Any] = {
+                "startDate": int(start_date),
+                "endDate": int(end_date),
+                "perPage": per_page,
+            }
+            if pagination_key:
+                params["paginationKey"] = pagination_key
+            data = self._get("/trades", params)
+            if isinstance(data, dict):
+                rows = data.get("trades") or []
+                nxt = data.get("nextKey")
+            elif isinstance(data, list):
+                rows = data
+                nxt = None
+            else:
+                break
+            out.extend(row for row in rows if isinstance(row, dict))
+            if not nxt or nxt in seen or len(rows) < per_page:
+                break
+            seen.add(nxt)
+            pagination_key = nxt
+            time.sleep(0.12)
+        return out
+
     def find_markets(self, market_hashes: list[str]) -> list[dict[str, Any]]:
         """Active or settled markets by hash. Up to 30 hashes per request."""
         out: list[dict[str, Any]] = []

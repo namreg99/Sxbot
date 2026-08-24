@@ -6,6 +6,7 @@ import sys
 import time
 
 from sxbot.api import SxApiError, SxClient, index_markets
+from sxbot.board import build_snapshot, render_text, serve_board
 from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
 from sxbot.flow import Motive
@@ -84,6 +85,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Paper-trade new fills from labeled wallets (V2 only; skips longshots)",
     )
     mimic.add_argument("--once", action="store_true", help="Prime + one copy poll then exit")
+    board = sub.add_parser(
+        "board",
+        help="Auto-refresh dashboard: 5k+ tape today/yesterday + paper feed (browser or Telegram)",
+    )
+    board.add_argument("--host", default=None, help="Bind address (default SX_BOARD_HOST / 127.0.0.1)")
+    board.add_argument("--port", type=int, default=None, help="Port (default SX_BOARD_PORT / 8765)")
+    board.add_argument("--once", action="store_true", help="Print one snapshot and exit")
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -118,6 +126,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_archive(client, settings, args)
             if args.cmd == "mimic":
                 return cmd_mimic(client, settings, once=args.once)
+            if args.cmd == "board":
+                return cmd_board(client, settings, args)
             bot = Bot(settings, client)
             if args.cmd == "scan":
                 return cmd_scan(bot, args.limit)
@@ -249,6 +259,25 @@ def cmd_grade(client: SxClient, settings: Settings) -> int:
         print("-" * 70)
         print()
         _print_grade(client, settings.mimic_log, title="mimic paper")
+    return 0
+
+
+def cmd_board(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:
+    host = args.host or settings.board_host
+    port = int(args.port or settings.board_port)
+    if args.once:
+        snap = build_snapshot(client, settings)
+        print(render_text(snap))
+        return 0
+    print(f"board  http://{host}:{port}  (auto-refresh {settings.board_refresh_seconds}s)")
+    if settings.telegram_token and settings.telegram_chat_id:
+        print("telegram alerts enabled")
+    else:
+        print(
+            "Telegram optional: set SX_TELEGRAM_TOKEN and SX_TELEGRAM_CHAT_ID "
+            "(BotFather bot, then message it and use getUpdates for the chat id)."
+        )
+    serve_board(client, settings, host=host, port=port)
     return 0
 
 

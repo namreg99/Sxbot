@@ -90,6 +90,12 @@ class Settings:
     min_persistence: float = 0.01
     flicker_bps: int = 800
     tennis_dog_live_hours: float = 5.0
+    board_host: str = "127.0.0.1"
+    board_port: int = 8765
+    board_refresh_seconds: int = 20
+    big_fill_usdc: float = 5000.0
+    telegram_token: str | None = None
+    telegram_chat_id: str | None = None
 
     @classmethod
     def load(cls) -> Settings:
@@ -142,6 +148,12 @@ class Settings:
             min_persistence=float(os.getenv("SX_MIN_PERSISTENCE", "0.01")),
             flicker_bps=int(os.getenv("SX_FLICKER_BPS", "800")),
             tennis_dog_live_hours=float(os.getenv("SX_TENNIS_DOG_LIVE_HOURS", "5")),
+            board_host=os.getenv("SX_BOARD_HOST", "127.0.0.1").strip() or "127.0.0.1",
+            board_port=int(os.getenv("SX_BOARD_PORT", "8765")),
+            board_refresh_seconds=int(os.getenv("SX_BOARD_REFRESH_SECONDS", "20")),
+            big_fill_usdc=float(os.getenv("SX_BIG_FILL_USDC", "5000")),
+            telegram_token=os.getenv("SX_TELEGRAM_TOKEN") or None,
+            telegram_chat_id=os.getenv("SX_TELEGRAM_CHAT_ID") or None,
         )
 
     @property
