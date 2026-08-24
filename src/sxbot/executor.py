@@ -89,6 +89,10 @@ class Executor:
             self._append(record, signal)
             return record
 
+        if signal.action is Action.MM_FILL:
+            self._append(record, signal)
+            return record
+
         if signal.action is Action.CANCEL:
             if self.client is None:
                 raise RuntimeError("live cancel requires an API client")

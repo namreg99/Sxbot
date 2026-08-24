@@ -4,11 +4,11 @@ import time
 from typing import Any
 
 from sxbot.config import Settings
-from sxbot.filters import STYLE_TENNIS_DOG
+from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
 from sxbot.models import Action, Exposure, Side, Signal
 from sxbot.units import to_base_units
 
-_TRADE_ACTIONS = {Action.JOIN_MAKER, Action.TAKE_STALE, Action.TAKE_FLOW}
+_TRADE_ACTIONS = {Action.JOIN_MAKER, Action.TAKE_STALE, Action.TAKE_FLOW, Action.MM_FILL}
 
 
 class RiskGate:
@@ -34,17 +34,15 @@ class RiskGate:
         window are restored onto the cap so we keep watching after kickoff.
         """
         now = int(now if now is not None else time.time())
-        last: dict[str, dict[str, Any]] = {}
+        last: dict[tuple[str, str], dict[str, Any]] = {}
         for row in rows:
             market = str(row.get("market") or "")
-            if market:
-                last[market] = row
-        grace = float(self.settings.tennis_dog_live_hours or 0) * 3600.0
-        for market, row in last.items():
-            action = str(row.get("action") or "")
             side = str(row.get("side") or "")
-            if not side:
-                continue
+            if market and side:
+                last[(market, side)] = row
+        grace = float(self.settings.tennis_dog_live_hours or 0) * 3600.0
+        for (market, side), row in last.items():
+            action = str(row.get("action") or "")
             if action == Action.CANCEL.value:
                 continue
             if action not in {a.value for a in _TRADE_ACTIONS}:
@@ -56,6 +54,21 @@ class RiskGate:
             event_id = str(row.get("event_id") or "")
             if event_id:
                 self.event_markets.setdefault(event_id, set()).add(market)
+            if style == STYLE_MM:
+                if action == Action.MM_FILL.value:
+                    continue
+                kickoff = int(row.get("game_time") or 0)
+                if kickoff and now >= kickoff:
+                    continue
+                try:
+                    side_enum = Side(side)
+                except ValueError:
+                    continue
+                self.quoted.add(market)
+                self.quoted_at[market] = float(row.get("ts") or now)
+                self.quoted_kickoff[market] = kickoff
+                self.exposure.add(market, side_enum, self.stake())
+                continue
             if style != STYLE_TENNIS_DOG:
                 continue
             kickoff = int(row.get("game_time") or 0)
@@ -79,12 +92,21 @@ class RiskGate:
 
         if signal.action is Action.CANCEL:
             return None
+        if signal.action is Action.MM_FILL:
+            return None
         if (
             not self.settings.allow_live
             and signal.market.game_time
             and signal.market.game_time <= int(time.time())
         ):
             return "live market disabled"
+        replacing = (
+            signal.style == STYLE_MM
+            and signal.action is Action.JOIN_MAKER
+            and (market_hash, signal.side.value) in self.joined_sides
+        )
+        if replacing:
+            return None
         if self.exposure.open_markets() >= self.settings.max_open_markets and market_hash not in self.quoted:
             return "max open markets"
         if self.exposure.total() + stake > max_total:

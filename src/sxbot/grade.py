@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from sxbot.api import lookup_market
+from sxbot.filters import STYLE_MM
+from sxbot.models import Action
 from sxbot.units import payout, to_usdc
 
 
@@ -176,6 +178,17 @@ def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: i
     )
 
 
+def gradeable_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """MM paper is graded on tape fills only. Follow-bot still assumes joins fill."""
+    mmish = any(
+        str(row.get("style") or "") == STYLE_MM or str(row.get("action") or "") == Action.MM_FILL.value
+        for row in rows
+    )
+    if mmish:
+        return [row for row in rows if str(row.get("action") or "") == Action.MM_FILL.value]
+    return [row for row in rows if str(row.get("action") or "") != Action.CANCEL.value]
+
+
 def grade_paper(
     rows: list[dict[str, Any]],
     markets: dict[str, dict[str, Any]],
@@ -183,7 +196,7 @@ def grade_paper(
     decimals: int = 6,
 ) -> list[GradedBet]:
     out: list[GradedBet] = []
-    for row in rows:
+    for row in gradeable_rows(rows):
         market_hash = str(row.get("market") or "")
         out.append(grade_row(row, lookup_market(markets, market_hash), decimals=decimals))
     return out
@@ -192,22 +205,30 @@ def grade_paper(
 def format_grade(bets: list[GradedBet], *, now: int | None = None) -> str:
     lines: list[str] = []
     if not bets:
-        lines.append("No paper bets in the log yet. Leave `sxbot run` going first.")
+        lines.append("No paper bets in the log yet. Leave `sxbot run` or `sxbot mm` going first.")
         return "\n".join(lines)
 
     counts = Counter(b.result for b in bets)
     settled = [b for b in bets if b.result in {"win", "lose", "void"}]
     pnl = sum(b.pnl_usdc or 0.0 for b in settled)
     staked = sum(b.stake_usdc for b in settled)
-    lines.append(
-        "This is NOT a rewind of old order books. SX does not keep those. "
-        "This scores paper quotes *after SX reports the outcome*, assuming each quote got filled."
-    )
+    mm_fills = bool(bets) and all(b.action == Action.MM_FILL.value for b in bets)
+    if mm_fills:
+        lines.append(
+            "Pregame maker fills matched against the public tape (join-behind quotes "
+            "the inside had to trade through). Unfilled resting quotes are not scored."
+        )
+    else:
+        lines.append(
+            "This is NOT a rewind of old order books. SX does not keep those. "
+            "This scores paper quotes *after SX reports the outcome*, assuming each quote got filled."
+        )
     lines.append(
         "A TV final is not enough — `sxbot grade` waits for SX `outcome`/`reportedDate`. "
         "Totals often report before moneylines and spreads."
     )
-    lines.append("Joining as a maker often does not fill — real results will usually be smaller.")
+    if not mm_fills:
+        lines.append("Joining as a maker often does not fill — real results will usually be smaller.")
     lines.append("")
     lines.append(f"paper quotes     {len(bets)}")
     lines.append(f"  still pending  {counts.get('pending', 0)}")
@@ -228,7 +249,10 @@ def format_grade(bets: list[GradedBet], *, now: int | None = None) -> str:
         )
     if settled:
         lines.append(f"settled stake    {staked:.1f} USDC")
-        lines.append(f"paper P&L        {pnl:+.2f} USDC   (if every quote filled)")
+        if mm_fills:
+            lines.append(f"paper P&L        {pnl:+.2f} USDC   (tape-matched fills only)")
+        else:
+            lines.append(f"paper P&L        {pnl:+.2f} USDC   (if every quote filled)")
     else:
         lines.append(
             "No games in this log have an SX-reported outcome yet. "

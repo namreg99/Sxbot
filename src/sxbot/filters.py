@@ -15,7 +15,8 @@ from sxbot.wallets import SPORT_BASEBALL, SPORT_FOOTBALL, SPORT_SOCCER, SPORT_TE
 
 TOTAL_TYPES = {2, 28, 236}
 # Paper styles. Each `sxbot run` join goes to sxbot-paper-{style}.jsonl.
-QUOTE_STYLES = ("mlb", "soccer", "tennis_short", "tennis_dog")
+QUOTE_STYLES = ("mlb", "soccer", "tennis_short", "tennis_dog", "mm")
+STYLE_MM = "mm"
 
 # Type 226 is SX's MLB moneyline. Type 1 is soccer Team / Not Team.
 MLB_MONEYLINE_TYPE = 226

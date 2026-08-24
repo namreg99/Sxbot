@@ -28,7 +28,7 @@ from sxbot.wallets import CANDIDATE_WALLETS, KNOWN_WALLETS, labeled_addresses
 
 log = logging.getLogger("sxbot.board")
 
-_TRADE_ACTIONS = {"join_maker", "take_stale", "take_flow"}
+_TRADE_ACTIONS = {"join_maker", "take_stale", "take_flow", "mm_fill"}
 BEST_PRICED_MAX_DECIMAL = 1.80
 
 

@@ -85,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Paper-trade new fills from labeled wallets (V2 only; skips longshots)",
     )
     mimic.add_argument("--once", action="store_true", help="Prime + one copy poll then exit")
+    mm = sub.add_parser(
+        "mm",
+        help="Pregame two-sided market maker (paper by default; own log, not sxbot run)",
+    )
+    mm.add_argument("--once", action="store_true", help="One quote pass then exit")
     board = sub.add_parser(
         "board",
         help="Auto-refresh dashboard: 5k+ tape today/yesterday + paper feed (browser or Telegram)",
@@ -126,6 +131,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_archive(client, settings, args)
             if args.cmd == "mimic":
                 return cmd_mimic(client, settings, once=args.once)
+            if args.cmd == "mm":
+                return cmd_mm(client, settings, once=args.once)
             if args.cmd == "board":
                 return cmd_board(client, settings, args)
             bot = Bot(settings, client)
@@ -389,6 +396,22 @@ def cmd_mimic(client: SxClient, settings: Settings, *, once: bool) -> int:
     primed = bot.step()
     copied = bot.step()
     print(f"mimic primed then copied {copied} new fill(s) (prime={primed})")
+    return 0
+
+
+def cmd_mm(client: SxClient, settings: Settings, *, once: bool) -> int:
+    from sxbot.mm import MakerBot, mm_log_path
+
+    bot = MakerBot(settings, client)
+    print(
+        f"pregame maker  dry_run={settings.dry_run}  log={mm_log_path(settings)}  "
+        f"stake={settings.stake_usdc} USDC both sides, pull at kickoff"
+    )
+    if once:
+        n = bot.step()
+        print(f"mm executed {n} action(s)")
+        return 0
+    bot.run()
     return 0
 
 
