@@ -73,7 +73,7 @@ sxbot makers          # labeled wallets that mostly make, ranked by fill ROI
 sxbot overlap         # V2 only: who was quoting when our classifier fired?
 sxbot mimic           # paper-copy new fills from those wallets (V2 only)
 sxbot mm              # pregame ghost maker, heavy side (paper; own log)
-sxbot board           # live dashboard: 5k+ tape + paper feed
+sxbot board           # dashboard on THIS machine: http://127.0.0.1:8765
 ```
 
 `sxbot flow --once` and `sxbot run --once` do two polls then exit. `sxbot mm --once` quotes the current pregame books immediately (it does not need a previous snapshot).
@@ -159,6 +159,15 @@ After V3, drop mimic. Keep `SX_FOLLOW_STYLE=take` for a Gary-like soccer/tennis 
 ## Pregame market maker (`sxbot mm`)
 
 This is a **separate** paper bot from `sxbot run`. Paper orders cannot actually rest on SX, so this bot **ghost-quotes**: it studies resting size on each side, sits one tick behind the **heavy** book (where makers already parked), and pretends that quote is live. A fill is scored only when the public tape takes the opposite outcome **at or through our price**, or the inside on our side is eaten to us after an opposite take. After a fill we **hold** — we do not auto-hedge the other side.
+
+Maker extract is **not** the follow-bot price band. Pick’em (1.80–2.20) is the worst maker bucket in soccer, MLB moneylines, and tennis. Default one-sided bands:
+
+- **Soccer type-1** (Team / Not Team): short 1.12–1.40 or dog 2.20–3.50
+- **MLB moneyline**: fav 1.40–1.80 or dog 2.20–3.50
+- **MLB run-line**: 1.12–1.80 (not pick’em)
+- **Tennis match ML**: fav 1.40–1.80 or dog 2.20–3.50
+
+Skip soccer Team/Team, NFL, basketball, totals, and pick’em. Hold the posted side through size flicker; do not reprice on a 1-tick wobble.
 
 Two-sided making (rest both outcomes, lock an overround if both fill, plus maker rewards while unmatched) is the spread/rewards shape. It is **not** the better extract path in the labeled sample: HedgeHog was ~70% maker and still red on fills, and only about a third of their maker markets filled both ways. `SX_MM_TWO_SIDED=true` restores that both-sides loop.
 

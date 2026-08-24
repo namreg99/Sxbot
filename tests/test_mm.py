@@ -45,12 +45,16 @@ def test_quote_pair_joins_behind_both_sides() -> None:
 
 
 def test_quote_pair_ghosts_the_heavy_side_only() -> None:
-    view = analyze(make_book(o1=((50.0, 40),), o2=((49.0, 5),)))
+    # 62% is baseball fav (1.40–1.80). Pick'em 50% is the red maker band.
+    view = analyze(make_book(o1=((62.0, 40),), o2=((37.0, 5),)))
     pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings(mm_two_sided=False, min_imbalance=0.15))
     assert pair is not None
-    assert pair.odds_one == from_percent(49.875)
+    assert pair.odds_one == from_percent(61.875)
     assert pair.odds_two is None
-    balanced = analyze(make_book(o1=((50.0, 10),), o2=((49.0, 10),)))
+    assert "mlb" in pair.reason
+    pickem = analyze(make_book(o1=((50.0, 40),), o2=((49.0, 5),)))
+    assert quote_pair(_mlb(), pickem, OddsLadder(125), make_settings(mm_two_sided=False, min_imbalance=0.15)) is None
+    balanced = analyze(make_book(o1=((62.0, 10),), o2=((37.0, 10),)))
     assert quote_pair(_mlb(), balanced, OddsLadder(125), make_settings(mm_two_sided=False, min_imbalance=0.15)) is None
 
 
@@ -89,8 +93,8 @@ def test_quote_pair_skips_one_sided_and_longshot() -> None:
 
 
 def test_quote_pair_does_not_hedge_after_one_fill() -> None:
-    view = analyze(make_book(o1=((50.0, 40),), o2=((49.0, 5),)))
-    resting = MMResting(odds_one=from_percent(49.875), filled_one=True)
+    view = analyze(make_book(o1=((62.0, 40),), o2=((37.0, 5),)))
+    resting = MMResting(odds_one=from_percent(61.875), filled_one=True)
     pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings(mm_two_sided=False), resting)
     assert pair is None
 
@@ -246,12 +250,45 @@ def test_quote_pair_skips_crossed_book() -> None:
     assert quote_pair(_mlb(), view, OddsLadder(125), make_settings()) is None
 
 
+def test_mm_holds_through_imbalance_flicker_and_one_tick_wobble() -> None:
+    ladder = OddsLadder(125)
+    settings = make_settings(mm_two_sided=False, min_imbalance=0.15)
+    posted = from_percent(61.875)
+    resting = MMResting(odds_one=posted)
+    dipped = analyze(make_book(o1=((62.0, 11),), o2=((37.0, 10),)))
+    held = quote_pair(_mlb(), dipped, ladder, settings, resting)
+    assert held is not None
+    assert held.odds_one == posted
+    assert held.odds_two is None
+    assert "hold" in held.reason
+    wobble = analyze(make_book(o1=((62.125, 40),), o2=((37.0, 5),)))
+    still = quote_pair(_mlb(), wobble, ladder, settings, resting)
+    assert still is not None
+    assert still.odds_one == posted
+    steam = analyze(make_book(o1=((65.0, 40),), o2=((34.0, 5),)))
+    moved = quote_pair(_mlb(), steam, ladder, settings, resting)
+    assert moved is not None
+    assert moved.odds_one == from_percent(64.875)
+    assert moved.odds_one != posted
+
+
+def test_mm_skips_soccer_team_vs_team() -> None:
+    view = analyze(make_book(o1=((32.0, 40),), o2=((67.0, 5),)))
+    market = _soccer(type=52, outcome_one="Fulham", outcome_two="Chelsea")
+    assert quote_pair(market, view, OddsLadder(125), make_settings()) is None
+
+
 def test_soccer_two_way_is_quoteable() -> None:
     view = analyze(make_book(o1=((55.0, 10),), o2=((44.0, 10),)))
     pair = quote_pair(_soccer(), view, OddsLadder(125), make_settings(mm_two_sided=True))
     assert pair is not None
     assert pair.odds_one is not None and pair.odds_two is not None
-    heavy = analyze(make_book(o1=((55.0, 40),), o2=((44.0, 5),)))
-    ghost = quote_pair(_soccer(), heavy, OddsLadder(125), make_settings(mm_two_sided=False))
+    # One-sided extract skips soccer pick'em (1.80–2.20 was −9% for type-1 makers).
+    pickem = analyze(make_book(o1=((55.0, 40),), o2=((44.0, 5),)))
+    assert quote_pair(_soccer(), pickem, OddsLadder(125), make_settings(mm_two_sided=False)) is None
+    dog = analyze(make_book(o1=((32.0, 40),), o2=((67.0, 5),)))
+    ghost = quote_pair(_soccer(), dog, OddsLadder(125), make_settings(mm_two_sided=False))
     assert ghost is not None
-    assert ghost.odds_one is not None and ghost.odds_two is None
+    assert ghost.odds_one == from_percent(31.875)
+    assert ghost.odds_two is None
+    assert "soccer" in ghost.reason

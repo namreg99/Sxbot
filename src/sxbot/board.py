@@ -397,7 +397,7 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 <body>
 <header>
   <h1>sxbot board</h1>
-  <div class="meta">open <b>http://127.0.0.1:8765</b> after <code>sxbot board</code> · auto-refresh {int(refresh)}s · {html.escape(str(snap.get("generated_at") or ""))} ·
+  <div class="meta">open <b>http://127.0.0.1:8765</b> on the <i>same machine</i> as <code>sxbot board</code> · auto-refresh {int(refresh)}s · {html.escape(str(snap.get("generated_at") or ""))} ·
     names the side that was bet, not the first team in the label · paper assumes fills</div>
 </header>
 <div class="kpis">

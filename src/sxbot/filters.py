@@ -20,8 +20,11 @@ STYLE_MM = "mm"
 
 # Type 226 is SX's MLB moneyline. Type 1 is soccer Team / Not Team.
 MLB_MONEYLINE_TYPE = 226
+MLB_SPREAD_TYPE = 342
 SOCCER_TWO_WAY_TYPE = 1
 NFL_LEAGUE_ID = 243
+# Tennis set handicaps / totals / games — not the match moneyline.
+TENNIS_NON_ML_TYPES = {3, 166, 201, 236, 342, 866} | TOTAL_TYPES
 
 STYLE_TENNIS_DOG = "tennis_dog"
 
@@ -116,6 +119,34 @@ def is_tennis(market: Market) -> bool:
     return "tennis" in _sport(market)
 
 
+def is_tennis_ml(market: Market) -> bool:
+    if not is_tennis(market):
+        return False
+    if market.type in TENNIS_NON_ML_TYPES:
+        return False
+    o1 = (market.outcome_one or "").lower()
+    if "over" in o1 or "under" in o1:
+        return False
+    if "+" in o1 or "-1.5" in o1:
+        return False
+    return True
+
+
+def mm_family(market: Market) -> str | None:
+    """Pregame maker universe. Tighter than quote_family (follow bot).
+
+    Soccer type-52 (Team / Team) and NFL making were red in the archive.
+    Basketball pregame making was red. Totals stay out.
+    """
+    if is_soccer_ml(market) and market.type == SOCCER_TWO_WAY_TYPE:
+        return "soccer"
+    if is_mlb(market) and market.type in {MLB_MONEYLINE_TYPE, MLB_SPREAD_TYPE}:
+        return "mlb"
+    if is_tennis_ml(market):
+        return "tennis"
+    return None
+
+
 def quote_family(market: Market) -> str | None:
     """Sport/league bucket for scan preference. Price bands are applied later."""
     if is_soccer_ml(market):
@@ -159,4 +190,43 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
         dog_hi = min(3.50, cap) if cap > 0 else 3.50
         if _in_band(dec, 2.20, dog_hi):
             return "tennis_dog"
+    return None
+
+
+def _half_open(dec: float, low: float, high: float) -> bool:
+    """low <= decimal < high. Same edges as archive ODDS_BUCKETS."""
+    return low - 1e-12 <= dec < high - 1e-12
+
+
+def mm_quote_style(market: Market, price: int) -> str | None:
+    """Where pregame *maker fills* were not red. Not the follow-bot bands.
+
+    Pick'em (1.80–2.20) is the worst maker bucket in soccer, MLB ML, and tennis.
+    Follow-bot `quote_style` still uses pick'em for steam joins — do not mix them.
+    """
+    if price <= 0:
+        return None
+    if mm_family(market) is None:
+        return None
+    dec = decimal_odds(to_prob(price))
+    if is_soccer_ml(market) and market.type == SOCCER_TWO_WAY_TYPE:
+        # type-1 shorts +5%, dogs +17%; fav/pick red.
+        if _half_open(dec, 1.12, 1.40) or _half_open(dec, 2.20, 3.50):
+            return "soccer"
+        return None
+    if is_mlb(market) and market.type == MLB_MONEYLINE_TYPE:
+        # fav +15%, dog +48%; pick'em −7%.
+        if _half_open(dec, 1.40, 1.80) or _half_open(dec, 2.20, 3.50):
+            return "mlb"
+        return None
+    if is_mlb(market) and market.type == MLB_SPREAD_TYPE:
+        # run-line shorts/favs +11–16%; pick/dog red.
+        if _half_open(dec, 1.12, 1.80):
+            return "mlb"
+        return None
+    if is_tennis_ml(market):
+        # fav +7.5%, dog +5.6%; pick'em −9.5%.
+        if _half_open(dec, 1.40, 1.80) or _half_open(dec, 2.20, 3.50):
+            return "tennis"
+        return None
     return None

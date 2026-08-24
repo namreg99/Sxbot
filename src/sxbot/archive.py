@@ -788,5 +788,66 @@ def format_maker_roi(store: HistoryStore) -> str:
         "`sxbot mm` defaults to one-sided ghost quotes for extract, not that loop. "
         "Do not copy TennisMix basketball (+ROI, small sample)."
     )
+    lines.append("")
+    lines.append(format_maker_sport_bands(store))
+    return "\n".join(lines)
+
+
+def format_maker_sport_bands(store: HistoryStore) -> str:
+    """Pregame maker fill ROI by sport / type / odds band — the `sxbot mm` map."""
+    rows = list(
+        store._db.execute(
+            """
+            SELECT f.stake, f.odds, f.bet_time, f.pnl_usdc,
+                   m.sport_label, m.type, m.game_time
+            FROM fills f
+            LEFT JOIN markets m ON m.market_hash = f.market_hash
+            WHERE f.settled=1 AND f.is_maker=1
+            """
+        )
+    )
+    buckets: dict[tuple[str, str, str], list[tuple[float, float]]] = defaultdict(list)
+    for r in rows:
+        gt = int(r["game_time"] or 0)
+        bt = int(r["bet_time"] or 0)
+        if gt and bt >= gt:
+            continue
+        try:
+            odds = int(r["odds"] or 0)
+        except (TypeError, ValueError):
+            continue
+        dec = decimal_odds(to_prob(odds)) if odds else 0.0
+        sport = str(r["sport_label"] or "?")
+        typ = int(r["type"] or 0)
+        kind = {1: "type-1", 226: "ML", 342: "spread", 52: "ML", 3: "spread"}.get(typ, f"type-{typ}")
+        stake = int(r["stake"] or 0) / 1e6
+        pnl = float(r["pnl_usdc"] or 0)
+        buckets[(sport, kind, odds_bucket(dec) if dec else "unknown")].append((stake, pnl))
+    lines = [
+        "Pregame maker fills by sport × band (stake ≥ $20k). This is what `sxbot mm` uses.",
+        "Follow-bot pick'em (1.80–2.20) is the worst maker bucket in soccer, MLB ML, and tennis.",
+        f"{'sport':<12} {'kind':<8} {'band':<18} {'n':>5} {'stake':>10} {'pnl':>10} {'ROI%':>7}",
+    ]
+    ranked: list[tuple[float, str]] = []
+    for (sport, kind, band), sub in buckets.items():
+        stake = sum(s for s, _ in sub)
+        if stake < 20_000:
+            continue
+        pnl = sum(p for _, p in sub)
+        roi = pnl / stake if stake else 0.0
+        ranked.append(
+            (
+                abs(pnl),
+                f"{sport:<12} {kind:<8} {band:<18} {len(sub):5d} {stake:10,.0f} {pnl:+10,.0f} {roi*100:7.1f}",
+            )
+        )
+    ranked.sort(reverse=True)
+    lines.extend(row for _, row in ranked[:18])
+    lines.append("")
+    lines.append(
+        "MM one-sided bands: soccer type-1 short 1.12–1.40 or dog 2.20–3.50; "
+        "MLB ML fav 1.40–1.80 or dog 2.20–3.50; MLB run-line 1.12–1.80; "
+        "tennis ML fav 1.40–1.80 or dog 2.20–3.50. Skip pick'em, NFL, basketball, type-52 soccer."
+    )
     return "\n".join(lines)
 

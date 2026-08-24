@@ -27,8 +27,9 @@ from sxbot.filters import (
     STYLE_MM,
     kickoff_skip_reason,
     longshot_skip_reason,
+    mm_family,
+    mm_quote_style,
     order_skip_reason,
-    quote_family,
 )
 from sxbot.journal import load_jsonl, paper_log_for
 from sxbot.models import Action, Market, PublicTrade, Side, Signal
@@ -37,6 +38,9 @@ from sxbot.risk import RiskGate
 from sxbot.units import ODDS_SCALE, OddsLadder, decimal_odds, odds_from_bps, to_prob
 
 log = logging.getLogger("sxbot.mm")
+
+# Ignore 1–2 tick top-of-book wobble so we do not cancel/rejoin every poll.
+HOLD_TICKS = 2
 
 
 @dataclass
@@ -89,7 +93,7 @@ def mm_eligible(market: Market, settings: Settings, *, now: int | None = None) -
     skipped = order_skip_reason(market, settings, now=now)
     if skipped:
         return skipped
-    if quote_family(market) is None:
+    if mm_family(market) is None:
         return "sport"
     return None
 
@@ -124,6 +128,19 @@ def _join_price(view: BookView, side: Side, ladder: OddsLadder, ticks: int, sett
     return price
 
 
+def _within_ticks(have: int, want: int, ladder: OddsLadder, ticks: int) -> bool:
+    return abs(have - want) <= ticks * ladder.step
+
+
+def _ghost_pair(market: Market, view: BookView, side: Side, price: int, *, held: bool) -> QuotePair:
+    style = mm_quote_style(market, price) or mm_family(market) or "mm"
+    imb = f"imb {view.imbalance:+.2f}"
+    verb = "hold" if held else "ghost"
+    if side is Side.OUTCOME_ONE:
+        return QuotePair(price, None, f"{verb} {style} O1 ({imb})")
+    return QuotePair(None, price, f"{verb} {style} O2 ({imb})")
+
+
 def quote_pair(
     market: Market,
     view: BookView,
@@ -153,16 +170,30 @@ def quote_pair(
         if filled_one or filled_two:
             # Hold the filled side. Do not auto-hedge.
             return None
+        live_side: Side | None = None
+        have: int | None = None
+        if resting is not None:
+            if resting.odds_one is not None:
+                live_side, have = Side.OUTCOME_ONE, resting.odds_one
+            elif resting.odds_two is not None:
+                live_side, have = Side.OUTCOME_TWO, resting.odds_two
+        if live_side is not None and have:
+            # Persist the posted side through size flicker. Do not flip.
+            price = _join_price(view, live_side, ladder, behind, settings)
+            if price is None:
+                return None
+            held = _within_ticks(have, price, ladder, HOLD_TICKS)
+            keep = have if held else price
+            if mm_quote_style(market, keep) is None:
+                return None
+            return _ghost_pair(market, view, live_side, keep, held=held)
         side = liquidity_side(view, settings)
         if side is None:
             return None
         price = _join_price(view, side, ladder, behind, settings)
-        if price is None:
+        if price is None or mm_quote_style(market, price) is None:
             return None
-        imb = f"imb {view.imbalance:+.2f}"
-        if side is Side.OUTCOME_ONE:
-            return QuotePair(price, None, f"ghost heavy O1 {behind} tick(s) behind ({imb})")
-        return QuotePair(None, price, f"ghost heavy O2 {behind} tick(s) behind ({imb})")
+        return _ghost_pair(market, view, side, price, held=False)
 
     want_one = not filled_one
     want_two = not filled_two
@@ -402,6 +433,7 @@ class MakerBot:
                 "size_one": view.size_one,
                 "size_two": view.size_two,
                 "imbalance": view.imbalance,
+                "mm_style": mm_quote_style(market, want),
             },
         )
         if not replacing:

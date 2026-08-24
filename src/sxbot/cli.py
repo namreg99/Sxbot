@@ -283,6 +283,13 @@ def cmd_board(client: SxClient, settings: Settings, args: argparse.Namespace) ->
         print(render_text(snap))
         return 0
     print(f"board  http://{host}:{port}  (auto-refresh {settings.board_refresh_seconds}s)")
+    if host in {"127.0.0.1", "localhost"}:
+        print(
+            "That URL only works in a browser ON THIS MACHINE. "
+            "Opening it on your laptop looks up your laptop, where nothing is listening "
+            "— the browser will say the site is unavailable. "
+            "Run `sxbot board` on your own computer, or `sxbot board --once` here."
+        )
     if settings.telegram_token and settings.telegram_chat_id:
         print("telegram alerts enabled")
     else:
