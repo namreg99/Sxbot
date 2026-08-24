@@ -37,11 +37,21 @@ def _soccer(**overrides):
 
 def test_quote_pair_joins_behind_both_sides() -> None:
     view = analyze(make_book(o1=((50.0, 10),), o2=((49.0, 10),)))
-    pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings())
+    pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings(mm_two_sided=True))
     assert pair is not None
     assert pair.odds_one == from_percent(49.875)
     assert pair.odds_two == from_percent(48.875)
     assert pair.odds_one + pair.odds_two < 10**20
+
+
+def test_quote_pair_ghosts_the_heavy_side_only() -> None:
+    view = analyze(make_book(o1=((50.0, 40),), o2=((49.0, 5),)))
+    pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings(mm_two_sided=False, min_imbalance=0.15))
+    assert pair is not None
+    assert pair.odds_one == from_percent(49.875)
+    assert pair.odds_two is None
+    balanced = analyze(make_book(o1=((50.0, 10),), o2=((49.0, 10),)))
+    assert quote_pair(_mlb(), balanced, OddsLadder(125), make_settings(mm_two_sided=False, min_imbalance=0.15)) is None
 
 
 def test_quote_pair_widens_until_overround() -> None:
@@ -52,7 +62,7 @@ def test_quote_pair_widens_until_overround() -> None:
         _mlb(),
         view,
         OddsLadder(125),
-        make_settings(mm_min_overround_bps=100, mm_max_widen_ticks=8),
+        make_settings(mm_two_sided=True, mm_min_overround_bps=100, mm_max_widen_ticks=8),
     )
     assert pair is not None
     assert pair.odds_one + pair.odds_two <= 10**20 - (100 * 10**20 // 10_000)
@@ -70,7 +80,7 @@ def test_quote_pair_skips_live_and_totals() -> None:
 
 
 def test_quote_pair_skips_one_sided_and_longshot() -> None:
-    settings = make_settings()
+    settings = make_settings(mm_two_sided=True)
     ladder = OddsLadder(125)
     one_sided = analyze(make_book(o1=((50.0, 10),), o2=()))
     assert quote_pair(_mlb(), one_sided, ladder, settings) is None
@@ -78,10 +88,17 @@ def test_quote_pair_skips_one_sided_and_longshot() -> None:
     assert quote_pair(_mlb(), longshot, ladder, settings) is None
 
 
-def test_quote_pair_hedges_after_one_fill() -> None:
+def test_quote_pair_does_not_hedge_after_one_fill() -> None:
+    view = analyze(make_book(o1=((50.0, 40),), o2=((49.0, 5),)))
+    resting = MMResting(odds_one=from_percent(49.875), filled_one=True)
+    pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings(mm_two_sided=False), resting)
+    assert pair is None
+
+
+def test_quote_pair_hedges_after_one_fill_when_two_sided() -> None:
     view = analyze(make_book(o1=((50.0, 10),), o2=((49.0, 10),)))
     resting = MMResting(odds_one=from_percent(49.875), filled_one=True)
-    pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings(), resting)
+    pair = quote_pair(_mlb(), view, OddsLadder(125), make_settings(mm_two_sided=True), resting)
     assert pair is not None
     assert pair.odds_one is None
     assert pair.odds_two == from_percent(48.875)
@@ -102,8 +119,23 @@ def test_tape_fill_only_when_inside_eaten() -> None:
         )
     ]
     assert taker_hits_maker(Side.OUTCOME_ONE, taker_two)
+    # Opposite take at the inside while we sit one tick behind is not our fill.
     assert not quote_was_hit(resting, Side.OUTCOME_ONE, behind, taker_two)
+    # Same take once the inside is eaten to our ghost line.
     assert quote_was_hit(resting, Side.OUTCOME_ONE, eaten, taker_two)
+    through = [
+        PublicTrade(
+            trade_id="t2",
+            market_hash="0xabc",
+            is_betting_outcome_one=False,
+            stake=5_000_000,
+            odds=from_percent(50.125),
+            bet_time="1",
+        )
+    ]
+    # Tape printed at/through the taker price we offered, even if TOB is still in front.
+    assert quote_was_hit(resting, Side.OUTCOME_ONE, behind, through)
+    assert not quote_was_hit(resting, Side.OUTCOME_ONE, behind, [])
     assert not quote_was_hit(resting, Side.OUTCOME_ONE, eaten, [])
 
 
@@ -216,6 +248,10 @@ def test_quote_pair_skips_crossed_book() -> None:
 
 def test_soccer_two_way_is_quoteable() -> None:
     view = analyze(make_book(o1=((55.0, 10),), o2=((44.0, 10),)))
-    pair = quote_pair(_soccer(), view, OddsLadder(125), make_settings())
+    pair = quote_pair(_soccer(), view, OddsLadder(125), make_settings(mm_two_sided=True))
     assert pair is not None
     assert pair.odds_one is not None and pair.odds_two is not None
+    heavy = analyze(make_book(o1=((55.0, 40),), o2=((44.0, 5),)))
+    ghost = quote_pair(_soccer(), heavy, OddsLadder(125), make_settings(mm_two_sided=False))
+    assert ghost is not None
+    assert ghost.odds_one is not None and ghost.odds_two is None

@@ -215,8 +215,8 @@ def format_grade(bets: list[GradedBet], *, now: int | None = None) -> str:
     mm_fills = bool(bets) and all(b.action == Action.MM_FILL.value for b in bets)
     if mm_fills:
         lines.append(
-            "Pregame maker fills matched against the public tape (join-behind quotes "
-            "the inside had to trade through). Unfilled resting quotes are not scored."
+            "Pregame maker fills matched against the public tape (ghost quotes the "
+            "opposite side had to take at/through). Unfilled resting quotes are not scored."
         )
     else:
         lines.append(

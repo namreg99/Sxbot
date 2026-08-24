@@ -72,7 +72,7 @@ sxbot profiles        # sport / odds / live-vs-pregame style report
 sxbot makers          # labeled wallets that mostly make, ranked by fill ROI
 sxbot overlap         # V2 only: who was quoting when our classifier fired?
 sxbot mimic           # paper-copy new fills from those wallets (V2 only)
-sxbot mm              # pregame two-sided market maker (paper; own log)
+sxbot mm              # pregame ghost maker, heavy side (paper; own log)
 sxbot board           # live dashboard: 5k+ tape + paper feed
 ```
 
@@ -126,7 +126,8 @@ See `.env.example`. The knobs that matter:
 | `SX_KELLY_MAX_FRAC` | Never bet more than this share of bankroll on one take (default 5%) |
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
 | `SX_FOLLOW_STYLE` | `join` (sit behind makers), `take` (hit now), `mixed` (take strong steam, else join) |
-| `SX_MM_MAX_WIDEN_TICKS` | Pregame maker: extra ticks behind the inside until both quotes sum to < 100% |
+| `SX_MM_TWO_SIDED` | `false` (default): ghost-quote the heavy side only. `true`: rest both sides for a spread |
+| `SX_MM_MAX_WIDEN_TICKS` | Two-sided maker: extra ticks behind the inside until both quotes sum to < 100% |
 | `SX_MM_MIN_OVERROUND_BPS` | Minimum locked edge if both MM sides fill (default 25 bp of implied prob) |
 | `SX_SHARP_WALLETS` | Extra addresses on top of the four already paired (Gary, cypherprod, BotswanaMC, HedgeHog) |
 | `SX_MIMIC_MAX_DECIMAL` | Mimic skips longer shots than this (default 3.5 — do not clone 7.84 alts) |
@@ -153,21 +154,21 @@ Known profitable addresses are useful until **August 25**, then they vanish from
 
 `sxbot overlap` is the last labeled check before cutover: each flow signal is tagged with which of the four wallets were *resting* on the flagged side (`quoted_by`) and which *took* it on the same poll (`takers`). Leave `sxbot flow` or `sxbot run` going on V2, then `sxbot overlap`. After August 25 that column is gone; keep the jsonl and grade it against SX outcomes.
 
-After V3, drop mimic. Keep `SX_FOLLOW_STYLE=take` for a Gary-like soccer/tennis steam taker, `sxbot run` `join` for one-sided steam follows, and `sxbot mm` for a HedgeHog-like two-sided pregame book. Do not mix them in one process.
+After V3, drop mimic. Keep `SX_FOLLOW_STYLE=take` for a Gary-like soccer/tennis steam taker, `sxbot run` `join` for one-sided steam follows, and `sxbot mm` for a one-sided ghost maker (or `SX_MM_TWO_SIDED=true` for a HedgeHog-like two-sided book). Do not mix them in one process.
 
 ## Pregame market maker (`sxbot mm`)
 
-This is a **separate** paper bot from `sxbot run`. It does not copy HedgeHog's wallet. It copies the habit: rest **both** sides before kickoff on soccer / MLB / NFL / tennis moneylines, sit **behind** the inside (no penny-jumping), and pull when the game goes live.
+This is a **separate** paper bot from `sxbot run`. Paper orders cannot actually rest on SX, so this bot **ghost-quotes**: it studies resting size on each side, sits one tick behind the **heavy** book (where makers already parked), and pretends that quote is live. A fill is scored only when the public tape takes the opposite outcome **at or through our price**, or the inside on our side is eaten to us after an opposite take. After a fill we **hold** — we do not auto-hedge the other side.
 
-If both sides fill, the two implied probabilities sum to less than 100% — that locked overround is the maker's spread. Quotes that nobody trades through are **not** scored. `sxbot grade` only counts `mm_fill` rows, which fire when the public tape takes the opposite outcome and the best on our side has been eaten to or through our join.
+Two-sided making (rest both outcomes, lock an overround if both fill, plus maker rewards while unmatched) is the spread/rewards shape. It is **not** the better extract path in the labeled sample: HedgeHog was ~70% maker and still red on fills, and only about a third of their maker markets filled both ways. `SX_MM_TWO_SIDED=true` restores that both-sides loop.
 
-Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Maker-reward size (~$100, beat the orange line, rest ≥10s) is a later live problem; paper trains the quoting loop at `SX_STAKE_USDC`.
+Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Maker-reward size (~$100, beat the orange line, rest ≥10s) is a later live problem; paper trains the quoting loop at `SX_STAKE_USDC`. Pull at kickoff.
 
 ## Paper taker Kelly
 
 `sxbot run` with `SX_FOLLOW_STYLE=take` sizes each take with **⅝ Kelly** (between half-Kelly and ¾ Kelly) against a **$1000 paper bankroll**. Fair probability is the book's mid — SX's public API does not send the orange/global line. A take with no edge vs that mid is skipped, not rounded up to $5. Cap is `min(5% of bankroll, SX_MAX_PER_MARKET_USDC)`. Joins stay flat at `SX_STAKE_USDC`.
 
-A ~150k-fill sample (Dec/Jan + Jun + late July, including tennis) is what `sxbot profiles` is for. In that sample: **BotswanaMC** is the only labeled wallet with large **net** P&L, mostly pregame soccer and NFL at pick’em prices (1.80–2.20). **GambleGuruGary** prints millions of gross “Won” and is still **net negative** — the 1.13 hammer is a weapon, not the book. **Tennis lost money** for both takers. **cypherprod** is mixed maker/taker and the only one who is net-positive *live*. **HedgeHog** is the two-sided MM (`sxbot mm`). Do not clone all four as one bot.
+A ~150k-fill sample (Dec/Jan + Jun + late July, including tennis) is what `sxbot profiles` is for. In that sample: **BotswanaMC** is the only labeled wallet with large **net** P&L, mostly pregame soccer and NFL at pick’em prices (1.80–2.20). **GambleGuruGary** prints millions of gross “Won” and is still **net negative** — the 1.13 hammer is a weapon, not the book. **Tennis lost money** for both takers. **cypherprod** is mixed maker/taker and the only one who is net-positive *live*. **HedgeHog** is the two-sided MM (`SX_MM_TWO_SIDED=true`). Default `sxbot mm` is one-sided extract, not that book. Do not clone all four as one bot.
 
 ## How a signal is built
 

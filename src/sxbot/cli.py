@@ -91,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     mimic.add_argument("--once", action="store_true", help="Prime + one copy poll then exit")
     mm = sub.add_parser(
         "mm",
-        help="Pregame two-sided market maker (paper by default; own log, not sxbot run)",
+        help="Pregame paper maker: ghost-quote the heavy side (SX_MM_TWO_SIDED for both)",
     )
     mm.add_argument("--once", action="store_true", help="One quote pass then exit")
     board = sub.add_parser(
@@ -420,8 +420,8 @@ def cmd_mm(client: SxClient, settings: Settings, *, once: bool) -> int:
 
     bot = MakerBot(settings, client)
     print(
-        f"pregame maker  dry_run={settings.dry_run}  log={mm_log_path(settings)}  "
-        f"stake={settings.stake_usdc} USDC both sides, pull at kickoff"
+        f"pregame ghost maker  dry_run={settings.dry_run}  two_sided={settings.mm_two_sided}  "
+        f"log={mm_log_path(settings)}  stake={settings.stake_usdc} USDC, pull at kickoff"
     )
     if once:
         n = bot.step()

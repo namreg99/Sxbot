@@ -785,6 +785,7 @@ def format_maker_roi(store: HistoryStore) -> str:
         "No labeled wallet is a high-ROI maker on fills overall. "
         "cypherprod is the only maker-heavy book that is close (taker book is the plus). "
         "HedgeHog is the two-sided pregame habit — fill P&L is red before rewards. "
+        "`sxbot mm` defaults to one-sided ghost quotes for extract, not that loop. "
         "Do not copy TennisMix basketball (+ROI, small sample)."
     )
     return "\n".join(lines)

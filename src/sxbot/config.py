@@ -96,11 +96,14 @@ class Settings:
     big_fill_usdc: float = 5000.0
     telegram_token: str | None = None
     telegram_chat_id: str | None = None
-    # Pregame two-sided maker (`sxbot mm`). Widen behind the inside until
-    # both quotes sum to less than 100% by this many ticks / bps.
+    # Pregame maker (`sxbot mm`). Default is one-sided ghost quotes on the
+    # heavy book. Two-sided mode widens behind the inside until both quotes
+    # sum to less than 100% by this many ticks / bps.
     mm_max_widen_ticks: int = 6
     mm_min_overround_bps: int = 25
     mm_min_decimal: float = 1.12
+    # False = ghost-quote the heavy side only (extract trainer). True = classic two-sided MM.
+    mm_two_sided: bool = False
     # Paper taker Kelly. 0.625 is between half-Kelly (moderate) and 3/4 (aggressive).
     bankroll_usdc: float = 1000.0
     kelly_fraction: float = 0.625
@@ -167,6 +170,7 @@ class Settings:
             mm_max_widen_ticks=int(os.getenv("SX_MM_MAX_WIDEN_TICKS", "6")),
             mm_min_overround_bps=int(os.getenv("SX_MM_MIN_OVERROUND_BPS", "25")),
             mm_min_decimal=float(os.getenv("SX_MM_MIN_DECIMAL", "1.12")),
+            mm_two_sided=_bool("SX_MM_TWO_SIDED", False),
             bankroll_usdc=float(os.getenv("SX_BANKROLL_USDC", "1000")),
             kelly_fraction=float(os.getenv("SX_KELLY_FRACTION", "0.625")),
             kelly_max_frac=float(os.getenv("SX_KELLY_MAX_FRAC", "0.05")),

@@ -1,13 +1,17 @@
-"""Pregame two-sided market maker.
+"""Pregame paper maker: ghost-quote one side from liquidity, score the tape.
 
-This is not wallet-copying and it is not the steam-follow `sxbot run` loop.
-HedgeHog's *habit* (not their address) is: rest both sides before kickoff on
-two-sided moneylines, sit behind the inside instead of penny-jumping, and
-stop when the game goes live.
+Two-sided making (rest both outcomes, lock an overround) is how you collect a
+spread *if both sides fill*, plus maker rewards while unmatched. That is not
+the better extract path in our sample: HedgeHog was 70% maker and still red
+on fills, and only ~1 in 3 of their maker markets filled both ways.
 
-Edge if *both* sides fill: our two implied probabilities sum to less than
-100%. Tape-matched paper fills are the training signal — resting quotes are
-not assumed filled.
+Default is one-sided. We look at resting size, sit one tick behind the
+**heavy** side (makers already parked there), and pretend that quote is live.
+A paper fill fires only when the public tape takes the opposite outcome
+through our price — not when we merely posted. After a fill we hold; we do
+not auto-hedge the other side (that would turn an extract bet into a spread).
+
+Set SX_MM_TWO_SIDED=true for the old both-sides loop.
 """
 
 from __future__ import annotations
@@ -100,6 +104,26 @@ def _decimal_ok(price: int, settings: Settings) -> bool:
     return dec + 1e-9 >= floor
 
 
+def liquidity_side(view: BookView, settings: Settings) -> Side | None:
+    """Side where more maker size is parked. None if the book is balanced."""
+    if not view.two_sided:
+        return None
+    thresh = float(settings.min_imbalance or 0)
+    if abs(view.imbalance) < thresh:
+        return None
+    return Side.OUTCOME_ONE if view.imbalance > 0 else Side.OUTCOME_TWO
+
+
+def _join_price(view: BookView, side: Side, ladder: OddsLadder, ticks: int, settings: Settings) -> int | None:
+    best = view.best(side)
+    if best is None:
+        return None
+    price = ladder.tick_down(best, max(ticks, 0))
+    if price <= 0 or not ladder.on_ladder(price) or not _decimal_ok(price, settings):
+        return None
+    return price
+
+
 def quote_pair(
     market: Market,
     view: BookView,
@@ -109,10 +133,7 @@ def quote_pair(
     *,
     now: int | None = None,
 ) -> QuotePair | None:
-    """Join one-or-more ticks behind both bests until the pair locks an overround.
-
-    After a one-sided paper fill we only keep the unfilled side (the hedge).
-    """
+    """Ghost quote: one tick behind. Default one heavy side; optional two-sided."""
     why = mm_eligible(market, settings, now=now)
     if why:
         return None
@@ -126,12 +147,27 @@ def quote_pair(
     if filled_one and filled_two:
         return None
 
+    behind = max(int(settings.join_ticks_behind), 0)
+
+    if not bool(getattr(settings, "mm_two_sided", False)):
+        if filled_one or filled_two:
+            # Hold the filled side. Do not auto-hedge.
+            return None
+        side = liquidity_side(view, settings)
+        if side is None:
+            return None
+        price = _join_price(view, side, ladder, behind, settings)
+        if price is None:
+            return None
+        imb = f"imb {view.imbalance:+.2f}"
+        if side is Side.OUTCOME_ONE:
+            return QuotePair(price, None, f"ghost heavy O1 {behind} tick(s) behind ({imb})")
+        return QuotePair(None, price, f"ghost heavy O2 {behind} tick(s) behind ({imb})")
+
     want_one = not filled_one
     want_two = not filled_two
-    behind = max(int(settings.join_ticks_behind), 0)
     max_extra = max(int(settings.mm_max_widen_ticks), 0)
     min_edge = odds_from_bps(max(int(settings.mm_min_overround_bps), 0))
-
     last_one: int | None = None
     last_two: int | None = None
     for extra in range(0, max_extra + 1):
@@ -149,9 +185,7 @@ def quote_pair(
             if p1 + p2 <= ODDS_SCALE - min_edge:
                 return QuotePair(p1, p2, f"two-sided join {ticks} tick(s) behind")
             continue
-        # Hedge-only: one tick behind the remaining side is enough.
         return QuotePair(p1, p2, f"hedge {ticks} tick(s) behind")
-
     if want_one and want_two:
         return None
     return QuotePair(last_one, last_two, "hedge join behind") if (last_one or last_two) else None
@@ -163,15 +197,29 @@ def taker_hits_maker(side: Side, trades: list[PublicTrade]) -> bool:
     return any(trade.is_betting_outcome_one is want_taker_one for trade in trades)
 
 
+def _tape_took_our_price(resting_odds: int, side: Side, trades: list[PublicTrade]) -> bool:
+    """True when an opposite-side take printed at or through our ghost line."""
+    offered_taker = ODDS_SCALE - resting_odds
+    want_taker_one = side is Side.OUTCOME_TWO
+    for trade in trades:
+        if trade.is_betting_outcome_one is not want_taker_one:
+            continue
+        if trade.odds >= offered_taker:
+            return True
+    return False
+
+
 def quote_was_hit(
     resting_odds: int,
     side: Side,
     view: BookView,
     trades: list[PublicTrade],
 ) -> bool:
-    """Join-behind only fills after the inside on our side is eaten to/through us."""
+    """Ghost fill: opposite tape at/through our price, or the inside eaten to us."""
     if not taker_hits_maker(side, trades):
         return False
+    if _tape_took_our_price(resting_odds, side, trades):
+        return True
     best = view.best(side)
     if best is None:
         return True
@@ -202,16 +250,17 @@ def _signal(
 
 
 class MakerBot:
-    """Paper (default) two-sided pregame quoter with tape fill matching."""
+    """Paper ghost-quoter: one heavy side by default, tape fills only."""
 
     def __init__(self, settings: Settings, client: Any) -> None:
         mm_log = paper_log_for(settings.paper_log, STYLE_MM)
+        two_sided = bool(settings.mm_two_sided)
         mm_settings = replace(
             settings,
             paper_log=str(mm_log),
             watch_live=False,
             allow_live=False,
-            one_side_per_market=False,
+            one_side_per_market=not two_sided,
         )
         self.settings = mm_settings
         self.inner = Bot(mm_settings, client)
@@ -302,12 +351,20 @@ class MakerBot:
                 continue
             if not quote_was_hit(price, side, view, trades):
                 continue
-            signal = _signal(market, side, Action.MM_FILL, price, "tape took through our join", view)
+            signal = _signal(market, side, Action.MM_FILL, price, "tape took through our ghost line", view)
             stake = max(self.inner.risk.stake(), self.inner.meta.min_order)
-            self.inner.executor.execute(signal, stake)
+            self.inner.executor.execute(
+                signal,
+                stake,
+                extra={
+                    "ghost": True,
+                    "size_one": view.size_one,
+                    "size_two": view.size_two,
+                },
+            )
             slot.mark_filled(side)
             executed += 1
-            log.info("MM FILL %s %s @ %s", side.value, market.label, price)
+            log.info("MM FILL %s %s @ %s (tape)", side.value, market.label, price)
         if slot.both_filled:
             executed += self._cancel_resting(market, view, "both sides filled")
         return executed
@@ -337,7 +394,16 @@ class MakerBot:
             log.info("skip mm %s %s: %s", side.value, market.label, blocked)
             return 0
         stake = max(self.inner.risk.stake(), self.inner.meta.min_order)
-        self.inner.executor.execute(signal, stake)
+        self.inner.executor.execute(
+            signal,
+            stake,
+            extra={
+                "ghost": True,
+                "size_one": view.size_one,
+                "size_two": view.size_two,
+                "imbalance": view.imbalance,
+            },
+        )
         if not replacing:
             self.inner.risk.record(signal, stake)
         slot.set_odds(side, want)
@@ -380,8 +446,9 @@ class MakerBot:
 
     def run(self) -> None:
         log.info(
-            "starting pregame maker dry_run=%s stake=%s open_cap=%s",
+            "starting pregame ghost maker dry_run=%s two_sided=%s stake=%s open_cap=%s",
             self.settings.dry_run,
+            self.settings.mm_two_sided,
             self.settings.stake_usdc,
             self.settings.max_open_markets,
         )
