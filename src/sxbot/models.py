@@ -177,6 +177,7 @@ class Signal:
     confidence: float
     crossed: bool = False
     motive: str = ""
+    style: str = ""
 
 
 @dataclass

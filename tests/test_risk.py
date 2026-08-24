@@ -7,7 +7,7 @@ from tests.conftest import make_market, make_settings
 
 
 def _signal(action: Action = Action.JOIN_MAKER, hash_: str = "0x1") -> Signal:
-    market = make_market(market_hash=hash_)
+    market = make_market(market_hash=hash_, event_id=hash_)
     return Signal(
         market=market,
         side=Side.OUTCOME_ONE,
@@ -112,6 +112,72 @@ def test_releases_paper_slot_after_ttl() -> None:
     assert gate.release_finished(now=1_009) == []
     assert gate.release_finished(now=1_010) == ["0x1"]
     assert gate.allow(_signal(hash_="0x2")) is None
+
+
+def test_blocks_the_other_market_on_the_same_event() -> None:
+    gate = RiskGate(make_settings(max_exposure_usdc=1000, max_per_market_usdc=25))
+    guemes = replace(
+        _signal(hash_="0x1"),
+        market=make_market(market_hash="0x1", event_id="evt-9", outcome_one="Guemes"),
+    )
+    not_guemes = replace(
+        _signal(hash_="0x2"),
+        market=make_market(market_hash="0x2", event_id="evt-9", outcome_one="Not Guemes"),
+    )
+    gate.record(guemes)
+    assert gate.allow(not_guemes) == "already in this event"
+    other_event = replace(
+        _signal(hash_="0x3"),
+        market=make_market(market_hash="0x3", event_id="evt-10"),
+    )
+    assert gate.allow(other_event) is None
+
+
+def test_keeps_tennis_dog_slot_through_kickoff() -> None:
+    gate = RiskGate(
+        make_settings(
+            allow_live=False,
+            max_open_markets=1,
+            max_exposure_usdc=1000,
+            tennis_dog_live_hours=5,
+        )
+    )
+    join = replace(
+        _signal(hash_="0x1"),
+        market=make_market(market_hash="0x1", game_time=1_000),
+        style="tennis_dog",
+    )
+    gate.record(join)
+    assert gate.release_finished(now=1_001) == []
+    assert gate.allow(_signal(hash_="0x2")) == "max open markets"
+    assert gate.release_finished(now=1_000 + 5 * 3600) == ["0x1"]
+    assert gate.allow(_signal(hash_="0x2")) is None
+
+
+def test_hydrate_restores_event_lock_and_tennis_dog_watch() -> None:
+    gate = RiskGate(make_settings(max_exposure_usdc=1000, max_per_market_usdc=25, tennis_dog_live_hours=5))
+    now = 2_000
+    gate.hydrate(
+        [
+            {
+                "action": "join_maker",
+                "market": "0x1",
+                "side": "outcome_one",
+                "event_id": "evt-9",
+                "style": "tennis_dog",
+                "game_time": now + 60,
+                "ts": now - 10,
+            }
+        ],
+        now=now,
+    )
+    assert gate.allow(_signal(hash_="0x1")) == "already on this side"
+    other = replace(
+        _signal(hash_="0x2"),
+        market=make_market(market_hash="0x2", event_id="evt-9"),
+    )
+    assert gate.allow(other) == "already in this event"
+    assert "0x1" in gate.quoted
 
 
 def test_blocks_live_market_even_when_watched() -> None:

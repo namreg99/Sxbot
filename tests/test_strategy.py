@@ -29,6 +29,7 @@ def test_maker_reprice_joins_outcome_one() -> None:
     assert joins[0].side is Side.OUTCOME_ONE
     assert joins[0].maker_odds == from_percent(52.875)
     assert joins[0].mid_move_bps > 0
+    assert joins[0].style == "mlb"
 
 
 def test_maker_reprice_joins_outcome_two() -> None:
@@ -116,11 +117,9 @@ def test_skips_totals_even_on_steam() -> None:
 def test_skips_longshot_steam() -> None:
     prev = make_book(o1=((18.0, 10),), o2=((80.0, 10),), version="1")
     curr = make_book(o1=((22.0, 10),), o2=((76.0, 10),), version="2")
-    signals = _signals(prev, curr)
-    assert signals == []
-    kept = _signals(prev, curr, max_order_decimal=6.0)
-    assert kept
-    assert kept[0].action is Action.JOIN_MAKER
+    assert _signals(prev, curr) == []
+    # Raising the hard cap is not enough — 4.5 decimal is outside every style band.
+    assert _signals(prev, curr, max_order_decimal=6.0) == []
 
 
 def test_skips_not_tie() -> None:
@@ -140,6 +139,107 @@ def test_skips_not_tie() -> None:
         OddsLadder(125),
     )
     assert signals == []
+
+
+def test_skips_npb_and_kbo() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    market = make_market(
+        type=52,
+        sport_id=3,
+        sport_label="Baseball",
+        league_id=19,
+        league_label="NPB",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def test_skips_empty_book_flicker() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((70.0, 10),), o2=((29.0, 10),), version="2")
+    market = make_market(
+        type=1,
+        sport_id=5,
+        sport_label="Soccer",
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def test_skips_futures_kickoff() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    market = make_market(game_time=int(__import__("time").time()) + 30 * 24 * 3600)
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def test_tennis_dog_joins_in_band() -> None:
+    prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
+    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    market = make_market(
+        type=3,
+        sport_id=6,
+        sport_label="Tennis",
+        league_id=2,
+        league_label="ATP",
+        outcome_one="Player A",
+        outcome_two="Player B",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals
+    assert signals[0].style == "tennis_dog"
+
+
+def test_soccer_type1_joins_favorite_band() -> None:
+    prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
+    curr = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="2")
+    market = make_market(
+        type=1,
+        sport_id=5,
+        sport_label="Soccer",
+        league_id=1,
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals
+    assert signals[0].style == "soccer"
 
 
 def test_older_version_is_ignored() -> None:

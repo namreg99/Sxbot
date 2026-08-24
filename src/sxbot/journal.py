@@ -7,6 +7,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from sxbot.filters import QUOTE_STYLES
+
 
 def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
     file = Path(path)
@@ -24,16 +26,53 @@ def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
     return rows
 
 
+def paper_log_for(path: str | Path, style: str) -> Path:
+    file = Path(path)
+    if not style:
+        return file
+    return file.with_name(f"{file.stem}-{style}{file.suffix}")
+
+
+def iter_paper_logs(path: str | Path) -> list[Path]:
+    """Main paper log plus per-style files that already exist."""
+    file = Path(path)
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in (file, *(paper_log_for(file, style) for style in QUOTE_STYLES)):
+        resolved = candidate if not candidate.exists() else candidate.resolve()
+        key = resolved
+        if key in seen:
+            continue
+        seen.add(key)
+        if candidate.exists():
+            out.append(candidate)
+    return out
+
+
+def load_all_paper(path: str | Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for log in iter_paper_logs(path):
+        rows.extend(load_jsonl(log))
+    rows.sort(key=lambda row: float(row.get("ts") or 0))
+    return rows
+
+
 def _count(rows: list[dict[str, Any]], key: str) -> Counter[str]:
     return Counter(str(row.get(key) or "-") for row in rows)
 
 
 def format_summary(flow_path: str | Path, paper_path: str | Path) -> str:
     flow = load_jsonl(flow_path)
-    paper = load_jsonl(paper_path)
+    paper_files = iter_paper_logs(paper_path)
+    paper = load_all_paper(paper_path)
     lines: list[str] = []
     lines.append(f"flow events   {len(flow)}   ({flow_path})")
-    lines.append(f"paper orders  {len(paper)}   ({paper_path})")
+    if paper_files:
+        for log in paper_files:
+            n = len(load_jsonl(log))
+            lines.append(f"paper orders  {n}   ({log})")
+    else:
+        lines.append(f"paper orders  0   ({paper_path})")
     if not flow and not paper:
         lines.append(
             "No logs yet. Leave `sxbot run` going — it only writes while the process is up."

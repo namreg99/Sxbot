@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from sxbot.config import Settings
+from sxbot.journal import paper_log_for
 from sxbot.models import Action, ExchangeMeta, Signal
 from sxbot.units import to_percent, to_usdc
 
@@ -39,6 +40,7 @@ class Executor:
         self.meta = meta
         self.client = client
         self.paper_path = Path(paper_path or settings.paper_log)
+        self._paper_path_locked = paper_path is not None
         self._account = None
         if not settings.dry_run:
             self._account = _load_account(settings.private_key)
@@ -70,6 +72,8 @@ class Executor:
             "game_time": signal.market.game_time,
             "outcome_one": signal.market.outcome_one,
             "outcome_two": signal.market.outcome_two,
+            "event_id": signal.market.event_id,
+            "style": signal.style or "",
         }
         if extra:
             record.update(extra)
@@ -82,7 +86,7 @@ class Executor:
                 record["odds_pct"],
                 signal.reason,
             )
-            self._append(record)
+            self._append(record, signal)
             return record
 
         if signal.action is Action.CANCEL:
@@ -90,7 +94,7 @@ class Executor:
                 raise RuntimeError("live cancel requires an API client")
             result = self.client.cancel_all()
             record["result"] = result
-            self._append(record)
+            self._append(record, signal)
             return record
 
         if self.client is None or self._account is None:
@@ -102,7 +106,7 @@ class Executor:
         record["result"] = result
         record["clientOrderId"] = order.get("clientOrderId")
         log.info("LIVE %s %s -> %s", signal.action.value, signal.market.label, result)
-        self._append(record)
+        self._append(record, signal)
         return record
 
     def _sign_order(self, signal: Signal, stake: int, time_in_force: str) -> dict[str, Any]:
@@ -139,9 +143,12 @@ class Executor:
             "_digest": digest,
         }
 
-    def _append(self, record: dict[str, Any]) -> None:
-        self.paper_path.parent.mkdir(parents=True, exist_ok=True)
-        with self.paper_path.open("a", encoding="utf-8") as handle:
+    def _append(self, record: dict[str, Any], signal: Signal | None = None) -> None:
+        path = self.paper_path
+        if not self._paper_path_locked and signal is not None and signal.style:
+            path = paper_log_for(self.paper_path, signal.style)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
 
 

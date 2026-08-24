@@ -8,13 +8,15 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
+from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, quote_family
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
-from sxbot.journal import load_jsonl
-from sxbot.models import Book, Market, PublicTrade, Side
+from sxbot.journal import load_all_paper
+from sxbot.models import Action, Book, Market, PublicTrade, Side, Signal
 from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
 from sxbot.risk import RiskGate
@@ -44,7 +46,7 @@ class Bot:
         self._labeled = labeled_addresses(settings)
         self._quotes_by_market: dict[str, MarketQuotes] = {}
         self._takers_by_market: dict[str, dict[str, tuple[str, ...]]] = {}
-        self.risk.hydrate(load_jsonl(settings.paper_log))
+        self.risk.hydrate(load_all_paper(settings.paper_log))
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
         now = int(time.time())
@@ -72,12 +74,28 @@ class Bot:
                     continue
                 seen.add(market.market_hash)
                 out.append(market)
-        return pick_universe(
-            out,
+        pinned = [m for m in out if m.market_hash in self.risk.quoted]
+        filtered: list[Market] = []
+        for market in out:
+            if market.market_hash in self.risk.quoted:
+                filtered.append(market)
+                continue
+            if kickoff_skip_reason(market, self.settings, now=now):
+                continue
+            filtered.append(market)
+        picked = pick_universe(
+            filtered,
             cap,
             now,
             watch_live=self.settings.watch_live or self.settings.allow_live,
+            prefer=quote_family,
         )
+        seen_pick = {m.market_hash for m in picked}
+        for market in pinned:
+            if market.market_hash not in seen_pick:
+                picked.append(market)
+                seen_pick.add(market.market_hash)
+        return picked
 
     def scan_row(self, market: Market) -> tuple[Market, BookView] | None:
         try:
@@ -183,6 +201,24 @@ class Bot:
         tape = self.pull_tape(markets)
         for market, view in self.scan_many(markets):
             prev, report = self.classify_row(market, view, tape)
+            if prev is None and report is None:
+                continue
+            exit_signal = self._tennis_dog_exit(market, view, report)
+            if exit_signal is not None:
+                reason = self.risk.allow(exit_signal)
+                if reason:
+                    log.info("skip %s %s: %s", exit_signal.action.value, market.label, reason)
+                else:
+                    stake = max(self.risk.stake(), self.meta.min_order)
+                    self.executor.execute(exit_signal, stake)
+                    self.risk.record(exit_signal, stake)
+                    executed += 1
+                continue
+            if (
+                market.is_live()
+                and self.risk.quoted_style.get(market.market_hash) == STYLE_TENNIS_DOG
+            ):
+                continue
             if prev is None or report is None:
                 continue
             for signal in evaluate(
@@ -273,6 +309,41 @@ class Bot:
         except Exception:
             log.exception("heartbeat failed")
 
+    def _tennis_dog_exit(
+        self,
+        market: Market,
+        view: BookView,
+        report: FlowReport | None,
+    ) -> Signal | None:
+        """Pregame tennis dogs stay on the book until steam reverses live."""
+        if self.risk.quoted_style.get(market.market_hash) != STYLE_TENNIS_DOG:
+            return None
+        if market.market_hash not in self.risk.quoted:
+            return None
+        if not market.is_live():
+            return None
+        if report is None or not report.actionable or report.side is None:
+            return None
+        our_side = next(
+            (side for hash_, side in self.risk.joined_sides if hash_ == market.market_hash),
+            None,
+        )
+        if our_side is None or report.side.value == our_side:
+            return None
+        price = view.best(report.side) or 0
+        return Signal(
+            market=market,
+            side=Side(our_side),
+            action=Action.CANCEL,
+            maker_odds=price,
+            reason=f"tennis_dog live exit: steam reversed to {report.side.value}",
+            mid_move_bps=report.move_bps,
+            imbalance=view.imbalance,
+            confidence=report.confidence,
+            motive=report.motive.value,
+            style=STYLE_TENNIS_DOG,
+        )
+
 
 def pick_universe(
     markets: list[Market],
@@ -280,12 +351,22 @@ def pick_universe(
     now: int,
     *,
     watch_live: bool,
+    prefer: Callable[[Market], object] | None = None,
 ) -> list[Market]:
-    """Soonest pregame first; keep a slice of live books for intel."""
+    """Soonest pregame first; keep a slice of live books for intel.
+
+    `prefer` is an optional callable(market) -> truthy for sports we actually
+    quote (MLB / soccer / NFL / tennis). Those fill the cap first so NPB/KBO
+    tonight cannot crowd out the styles we bet.
+    """
     pregame = [m for m in markets if not m.is_live(now)]
     live = [m for m in markets if m.is_live(now)]
     pregame.sort(key=lambda m: m.game_time or 10**18)
     live.sort(key=lambda m: m.game_time or 0, reverse=True)
+    if prefer is not None:
+        hot = [m for m in pregame if prefer(m)]
+        cold = [m for m in pregame if not prefer(m)]
+        pregame = hot + cold
     if not watch_live:
         return pregame[:cap]
     live_slots = min(len(live), max(8, cap // 5)) if cap >= 10 else min(len(live), max(cap // 2, 1))

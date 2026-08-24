@@ -81,8 +81,15 @@ class Settings:
     skip_not_tie: bool = True
     join_tob_lag: bool = False
     one_side_per_market: bool = True
+    one_side_per_event: bool = True
     paper_slot_seconds: float = 7200.0
     max_order_decimal: float = 3.5
+    # Skip Sept NFL / Oct NBA in August. 192h = 8 days.
+    max_kickoff_hours: float = 192.0
+    # Empty-book 1000bp flicker: persist below this AND move >= flicker_bps.
+    min_persistence: float = 0.01
+    flicker_bps: int = 800
+    tennis_dog_live_hours: float = 5.0
 
     @classmethod
     def load(cls) -> Settings:
@@ -128,8 +135,13 @@ class Settings:
             skip_not_tie=_bool("SX_SKIP_NOT_TIE", True),
             join_tob_lag=_bool("SX_JOIN_TOB_LAG", False),
             one_side_per_market=_bool("SX_ONE_SIDE_PER_MARKET", True),
+            one_side_per_event=_bool("SX_ONE_SIDE_PER_EVENT", True),
             paper_slot_seconds=float(os.getenv("SX_PAPER_SLOT_SECONDS", "7200")),
             max_order_decimal=float(os.getenv("SX_MAX_ORDER_DECIMAL", "3.5")),
+            max_kickoff_hours=float(os.getenv("SX_MAX_KICKOFF_HOURS", "192")),
+            min_persistence=float(os.getenv("SX_MIN_PERSISTENCE", "0.01")),
+            flicker_bps=int(os.getenv("SX_FLICKER_BPS", "800")),
+            tennis_dog_live_hours=float(os.getenv("SX_TENNIS_DOG_LIVE_HOURS", "5")),
         )
 
     @property

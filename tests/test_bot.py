@@ -30,6 +30,32 @@ def test_watch_live_off_drops_in_play() -> None:
     assert [m.market_hash for m in picked] == ["soon"]
 
 
+def test_pick_universe_prefers_quoteable_sports() -> None:
+    now = 1_000
+    npb = make_market(
+        market_hash="npb",
+        game_time=now + 10,
+        sport_id=3,
+        type=52,
+        league_id=19,
+        league_label="NPB",
+        sport_label="Baseball",
+    )
+    mlb = make_market(
+        market_hash="mlb",
+        game_time=now + 100,
+        sport_id=3,
+        type=226,
+        league_label="MLB",
+        sport_label="Baseball",
+        league_id=3,
+    )
+    from sxbot.filters import quote_family
+
+    picked = pick_universe([npb, mlb], cap=1, now=now, watch_live=False, prefer=quote_family)
+    assert [m.market_hash for m in picked] == ["mlb"]
+
+
 def _radar_row(*, confidence: float) -> RadarRow:
     view = analyze(make_book(o1=((53.0, 10),), o2=((46.0, 10),)))
     report = FlowReport(

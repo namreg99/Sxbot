@@ -11,7 +11,7 @@ from sxbot.config import Settings
 from sxbot.flow import Motive
 from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
-from sxbot.journal import load_jsonl, print_summary
+from sxbot.journal import iter_paper_logs, load_jsonl, print_summary
 from sxbot.overlap import format_overlap_report, format_tag
 from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
 from sxbot.scoreboard import format_scoreboard, grade_flow
@@ -227,7 +227,22 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
 
 
 def cmd_grade(client: SxClient, settings: Settings) -> int:
-    _print_grade(client, settings.paper_log, title="join/run paper")
+    logs = iter_paper_logs(settings.paper_log)
+    if not logs:
+        _print_grade(client, settings.paper_log, title="join/run paper")
+    else:
+        for i, path in enumerate(logs):
+            if i:
+                print()
+                print("-" * 70)
+                print()
+            stem = path.stem
+            title = stem.replace("sxbot-paper-", "").replace("sxbot-paper", "join/run")
+            if title == "join/run":
+                title = "join/run paper"
+            else:
+                title = f"{title} paper"
+            _print_grade(client, str(path), title=title)
     mimic_rows = load_jsonl(settings.mimic_log)
     if mimic_rows:
         print()
@@ -407,8 +422,8 @@ def _poll_flow(bot: Bot, *, once: bool, signals_only: bool) -> int:
                 print(describe_book(market, view))
                 for signal in signals:
                     print(
-                        f"  SIGNAL {signal.action.value:11} {signal.side.value:12} "
-                        f"conf={signal.confidence:.2f}  {signal.reason}"
+                        f"  SIGNAL {signal.style or '-':<13} {signal.action.value:11} "
+                        f"{signal.side.value:12} conf={signal.confidence:.2f}  {signal.reason}"
                     )
                     print(f"  {format_tag(bot.overlap_tag(market, report))}")
                 continue

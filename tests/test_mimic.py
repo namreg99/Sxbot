@@ -1,3 +1,5 @@
+import time
+
 from sxbot.mimic import should_copy_taker
 from sxbot.units import from_percent
 from tests.conftest import make_market, make_settings
@@ -20,7 +22,7 @@ def test_copies_tennis_favorite() -> None:
         sport_id=6,
         sport_label="Tennis",
         league_label="ATP",
-        game_time=2_000_000_000,
+        game_time=int(time.time()) + 4 * 3600,
     )
     settings = make_settings(sport_ids=(8, 1, 3, 2, 5, 6), mimic_max_decimal=3.5)
     ok, why = should_copy_taker(_raw(88.5), market, settings)  # ~1.13

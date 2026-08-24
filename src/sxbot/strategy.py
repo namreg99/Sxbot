@@ -9,7 +9,7 @@ SX_FOLLOW_STYLE:
 from __future__ import annotations
 
 from sxbot.config import Settings
-from sxbot.filters import longshot_skip_reason, order_skip_reason
+from sxbot.filters import longshot_skip_reason, order_skip_reason, quote_style
 from sxbot.flow import FlowReport, Motive, classify
 from sxbot.models import Action, Market, PublicTrade, Signal, Side
 from sxbot.orderbook import BookView
@@ -48,6 +48,7 @@ def _signal(
     price: int,
     *,
     crossed: bool,
+    style: str,
 ) -> Signal:
     assert report.side is not None
     return Signal(
@@ -61,7 +62,26 @@ def _signal(
         confidence=report.confidence,
         crossed=crossed,
         motive=report.motive.value,
+        style=style,
     )
+
+
+def _priced(
+    market: Market,
+    report: FlowReport,
+    view: BookView,
+    action: Action,
+    price: int,
+    settings: Settings,
+    *,
+    crossed: bool,
+) -> Signal | None:
+    if longshot_skip_reason(price, settings):
+        return None
+    style = quote_style(market, price, settings)
+    if not style:
+        return None
+    return _signal(market, report, view, action, price, crossed=crossed, style=style)
 
 
 def evaluate(
@@ -79,36 +99,46 @@ def evaluate(
     report = report or classify(prev, curr, settings, trades=trades, steam_hits=steam_hits)
     if not report.actionable or report.side is None:
         return []
+    if (
+        report.motive is Motive.MAKER_STEAM
+        and report.persistence < float(settings.min_persistence or 0)
+        and abs(report.move_bps) >= int(settings.flicker_bps or 0)
+    ):
+        return []
 
-    style = (settings.follow_style or "join").strip().lower()
+    follow = (settings.follow_style or "join").strip().lower()
     spread_bps = curr.spread_bps()
     wide_enough = spread_bps is not None and spread_bps >= settings.min_spread_bps
     signals: list[Signal] = []
 
     if report.motive is Motive.CROSSED and settings.enable_take_stale:
         price = _take_against(curr, report.side)
-        if price is not None and not longshot_skip_reason(price, settings):
-            signals.append(
-                _signal(market, report, curr, Action.TAKE_STALE, price, crossed=True)
+        if price is not None:
+            signal = _priced(
+                market, report, curr, Action.TAKE_STALE, price, settings, crossed=True
             )
-            return signals
+            if signal is not None:
+                signals.append(signal)
+                return signals
 
     take_now = settings.enable_take_stale and report.motive in {
         Motive.MAKER_STEAM,
         Motive.SIZE_ROTATION,
     } and (
-        style == "take"
-        or (style == "mixed" and report.confidence >= 0.7)
+        follow == "take"
+        or (follow == "mixed" and report.confidence >= 0.7)
     )
     if take_now:
         price = _take_against(curr, report.side)
-        if price is not None and not longshot_skip_reason(price, settings):
-            signals.append(
-                _signal(market, report, curr, Action.TAKE_FLOW, price, crossed=curr.crossed)
+        if price is not None:
+            signal = _priced(
+                market, report, curr, Action.TAKE_FLOW, price, settings, crossed=curr.crossed
             )
-            return signals
+            if signal is not None:
+                signals.append(signal)
+                return signals
 
-    if style == "take":
+    if follow == "take":
         return signals
 
     join_motives = {Motive.MAKER_STEAM, Motive.SIZE_ROTATION}
@@ -118,8 +148,10 @@ def evaluate(
         wide_enough or report.motive is not Motive.TOB_LAG
     ):
         price = _join_odds(curr, report.side, ladder, settings.join_ticks_behind)
-        if price is not None and not longshot_skip_reason(price, settings):
-            signals.append(
-                _signal(market, report, curr, Action.JOIN_MAKER, price, crossed=curr.crossed)
+        if price is not None:
+            signal = _priced(
+                market, report, curr, Action.JOIN_MAKER, price, settings, crossed=curr.crossed
             )
+            if signal is not None:
+                signals.append(signal)
     return signals

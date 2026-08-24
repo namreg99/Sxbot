@@ -36,4 +36,44 @@ def test_dry_run_writes_paper_log(tmp_path) -> None:
     assert "join_maker" in line
     assert "Rams" in line
     assert "GambleGuruGary" in line
-    assert record["game_time"] == 2_000_000_000
+    assert record["game_time"] == signal.market.game_time
+    assert record["event_id"] == "L1"
+    assert record["style"] == ""
+
+
+def _meta() -> ExchangeMeta:
+    return ExchangeMeta(
+        chain_id=4162,
+        domain={},
+        base_token="0x0",
+        decimals=6,
+        escrow="0x0",
+        odds_ladder_step_size=125,
+        min_order=5_000_000,
+        min_resting=100_000,
+        max_create=10,
+        max_cancel=100,
+    )
+
+
+def test_dry_run_writes_style_paper_log(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    executor = Executor(make_settings(paper_log=str(paper)), _meta(), client=None)
+    signal = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=52_875_000_000_000_000_000,
+        reason="makers shifted",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        style="mlb",
+    )
+    executor.execute(signal, 5_000_000)
+    styled = tmp_path / "sxbot-paper-mlb.jsonl"
+    assert styled.exists()
+    assert not paper.exists()
+    line = styled.read_text(encoding="utf-8")
+    assert '"style": "mlb"' in line
+    assert '"event_id": "L1"' in line

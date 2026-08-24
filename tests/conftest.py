@@ -1,4 +1,5 @@
 from dataclasses import replace
+import time
 
 from sxbot.config import Settings
 from sxbot.models import Book, Level, Market
@@ -63,7 +64,7 @@ def make_market(**overrides) -> Market:
         team_two="49ers",
         outcome_one="Rams",
         outcome_two="49ers",
-        game_time=2_000_000_000,
+        game_time=int(time.time()) + 4 * 3600,
         live_enabled=True,
         main_line=True,
         line=None,
