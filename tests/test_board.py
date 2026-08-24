@@ -51,6 +51,20 @@ def test_unique_lifetime_rows_keep_kickoff_cancel() -> None:
     assert kept["odds_pct"] == 60
 
 
+def test_unique_rows_keep_follow_and_mm_on_same_side() -> None:
+    rows = [
+        {"action": "join_maker", "market": "0x1", "side": "outcome_two", "style": "soccer", "ts": 1},
+        {"action": "join_maker", "market": "0x1", "side": "outcome_two", "style": "mm", "ts": 2},
+        {"action": "cancel", "market": "0x1", "side": "outcome_two", "style": "soccer", "ts": 3},
+    ]
+    open_rows = unique_open_rows(rows)
+    assert len(open_rows) == 1
+    assert open_rows[0]["style"] == "mm"
+    life = unique_lifetime_rows(rows)
+    styles = {row["style"] for row in life}
+    assert styles == {"soccer", "mm"}
+
+
 def test_tape_windows_newest_first_and_cover() -> None:
     start, end = 0, 15 * 3600
     wins = _tape_windows(start, end)

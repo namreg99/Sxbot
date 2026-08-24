@@ -96,14 +96,14 @@ def _tape_windows(start: int, end: int) -> list[tuple[int, int]]:
 
 
 def unique_open_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Last join/take still live. A later cancel drops that market+side."""
-    last: dict[tuple[str, str], dict[str, Any]] = {}
+    """Last join/take still live. A later cancel drops that market+side+style."""
+    last: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
         market = str(row.get("market") or "")
         side = str(row.get("side") or "")
         if not market or not side:
             continue
-        key = (market, side)
+        key = (market, side, str(row.get("style") or ""))
         action = str(row.get("action") or "")
         if action == "cancel":
             last.pop(key, None)
@@ -114,8 +114,8 @@ def unique_open_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def unique_lifetime_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Last join/take/mm_fill per market+side. Kickoff cancel does not erase the card."""
-    last: dict[tuple[str, str], dict[str, Any]] = {}
+    """Last join/take/mm_fill per market+side+style. Kickoff cancel does not erase."""
+    last: dict[tuple[str, str, str], dict[str, Any]] = {}
     for row in rows:
         market = str(row.get("market") or "")
         side = str(row.get("side") or "")
@@ -123,7 +123,7 @@ def unique_lifetime_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         action = str(row.get("action") or "")
         if action in _TRADE_ACTIONS:
-            last[(market, side)] = row
+            last[(market, side, str(row.get("style") or ""))] = row
     return list(last.values())
 
 
