@@ -46,7 +46,7 @@ The bot defaults to **mainnet**. It sums V2 resting orders by price/side into th
 
 Only while `sxbot run` is actually running. There is no background daemon. Dry-run is the default (`SX_DRY_RUN=true`): intended orders go to `sxbot-paper-{mlb,soccer,tennis_short,tennis_dog}.jsonl` and nothing is signed. `sxbot mm` writes `sxbot-paper-mm.jsonl`. The old mixed `sxbot-paper.jsonl` dump is not loaded once those style files exist — erase it if it is still around. Flow events go to `sxbot-flow.jsonl`. `sxbot summary` prints both.
 
-The board **lifetime unique** card is the last join/take/fill per market+side. A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side. Do not mix those two piles.
+The board **lifetime unique** card is the last join/take/fill per market+side+style (`sxbot run` and `sxbot mm` do not overwrite each other). A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side. Do not mix those two piles.
 
 Live orders additionally need `SX_API_KEY`, `SX_PRIVATE_KEY`, `pip install -e ".[trade]"`, a funded proxy, and `SX_DRY_RUN=false`. Keep paper mode on until that log looks like a strategy you actually want to fund.
 
