@@ -921,8 +921,9 @@ def format_maker_rebuild(store: HistoryStore) -> str:
         "This is not a quick arb. Fast opposite takes (<5 min) are rare and tiny. "
         "cypherprod's plus is taking MORE of the same side hours later (soccer/MLB), "
         "not buying the other outcome to lock a spread. HedgeHog's opposite takes "
-        "do not flip their maker book green. `sxbot mm` still holds after a ghost "
-        "fill — auto-hedging would copy the worse path."
+        "do not flip their maker book green. TennisMix opposite-take +ROI is a $10k "
+        "sample. `sxbot mm` still holds after a ghost fill — auto-hedging would "
+        "copy the worse path."
     )
     return "\n".join(lines)
 

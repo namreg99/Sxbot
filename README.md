@@ -70,6 +70,7 @@ sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
 sxbot archive         # pull winter + summer fill history into SQLite
 sxbot profiles        # sport / odds / live-vs-pregame style report
 sxbot makers          # labeled wallets that mostly make, ranked by fill ROI
+sxbot fit             # rebuild sxbot-maker-model.json from the sqlite
 sxbot overlap         # V2 only: who was quoting when our classifier fired?
 sxbot mimic           # paper-copy new fills from those wallets (V2 only)
 sxbot mm              # pregame ghost maker, heavy side (paper; own log)
@@ -127,6 +128,8 @@ See `.env.example`. The knobs that matter:
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
 | `SX_FOLLOW_STYLE` | `join` (sit behind makers), `take` (hit now), `mixed` (take strong steam, else join) |
 | `SX_MM_TWO_SIDED` | `false` (default): ghost-quote the heavy side only. `true`: rest both sides for a spread |
+| `SX_MM_MIN_ROI` | Skip a ghost quote if the fitted cell shrinks below this (default 0) |
+| `SX_MM_MODEL_PATH` | Fill-ROI table from `sxbot fit` (default `sxbot-maker-model.json`) |
 | `SX_MM_MAX_WIDEN_TICKS` | Two-sided maker: extra ticks behind the inside until both quotes sum to < 100% |
 | `SX_MM_MIN_OVERROUND_BPS` | Minimum locked edge if both MM sides fill (default 25 bp of implied prob) |
 | `SX_SHARP_WALLETS` | Extra addresses on top of the four already paired (Gary, cypherprod, BotswanaMC, HedgeHog) |
@@ -169,9 +172,13 @@ Maker extract is **not** the follow-bot price band. Pick’em (1.80–2.20) is t
 
 Skip soccer Team/Team, NFL, basketball, totals, and pick’em. Hold the posted side through size flicker; do not reprice on a 1-tick wobble.
 
+`sxbot fit` learns a **table**, not a neural net. The sqlite has settled maker fills, not old order books, so there is nothing to train a deep model on. Each sport × type × odds-band × pregame/live cell gets a shrunk fill-ROI (prior $25k toward 0%). `sxbot mm` loads `sxbot-maker-model.json` and skips a quote if that cell shrinks red. Hardcoded bands stay as a second gate.
+
+**Maker rewards are a different payout.** SX pays USDC while a qualifying limit stays *unmatched* (mainline, typically ≥$100, better than the orange global line, rest ≥10s). A fill **stops** those points. The orange line is not on the public book API, paper quotes never rest, and reward USDC is not in the sqlite. Paper therefore trains fill ROI. Live rewards need a later module that can see the orange line and post $100+ without jumping the queue.
+
 Two-sided making (rest both outcomes, lock an overround if both fill, plus maker rewards while unmatched) is the spread/rewards shape. It is **not** the better extract path in the labeled sample: HedgeHog was ~70% maker and still red on fills, and only about a third of their maker markets filled both ways. `SX_MM_TWO_SIDED=true` restores that both-sides loop.
 
-Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Maker-reward size (~$100, beat the orange line, rest ≥10s) is a later live problem; paper trains the quoting loop at `SX_STAKE_USDC`. Pull at kickoff.
+Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Pull at kickoff.
 
 ## Paper taker Kelly
 

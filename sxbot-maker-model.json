@@ -1,0 +1,997 @@
+{
+  "version": 1,
+  "fitted_at": "2026-08-24T04:21:57Z",
+  "fills": 53104,
+  "prior_stake": 25000.0,
+  "prior_roi": 0.0,
+  "rewards_note": "Fill ROI only. SX maker rewards accrue while unmatched (typically $100, beat orange global line, rest \u226510s, mainline) and are not in this sqlite. The orange line is not on the public book API.",
+  "odds_buckets": [
+    [
+      "hammer \u22641.12",
+      1.0,
+      1.12
+    ],
+    [
+      "short 1.12\u20131.40",
+      1.12,
+      1.4
+    ],
+    [
+      "fav 1.40\u20131.80",
+      1.4,
+      1.8
+    ],
+    [
+      "pick 1.80\u20132.20",
+      1.8,
+      2.2
+    ],
+    [
+      "dog 2.20\u20133.50",
+      2.2,
+      3.5
+    ],
+    [
+      "longshot >3.50",
+      3.5,
+      99.0
+    ]
+  ],
+  "cells": {
+    "Baseball|ML|dog 2.20\u20133.50|live": {
+      "n": 75,
+      "stake": 5239.3837,
+      "pnl": 3932.3023
+    },
+    "Baseball|ML|dog 2.20\u20133.50|pregame": {
+      "n": 194,
+      "stake": 37606.2802,
+      "pnl": 18226.029
+    },
+    "Baseball|ML|fav 1.40\u20131.80|live": {
+      "n": 46,
+      "stake": 3985.1609,
+      "pnl": -491.7528
+    },
+    "Baseball|ML|fav 1.40\u20131.80|pregame": {
+      "n": 199,
+      "stake": 41340.5207,
+      "pnl": 6427.1431
+    },
+    "Baseball|ML|hammer \u22641.12|live": {
+      "n": 6,
+      "stake": 877.0065,
+      "pnl": 72.34
+    },
+    "Baseball|ML|hammer \u22641.12|pregame": {
+      "n": 15,
+      "stake": 18026.62,
+      "pnl": -5267.3402
+    },
+    "Baseball|ML|longshot >3.50|live": {
+      "n": 51,
+      "stake": 1918.1036,
+      "pnl": -490.7403
+    },
+    "Baseball|ML|longshot >3.50|pregame": {
+      "n": 3,
+      "stake": 556.7521,
+      "pnl": -556.7521
+    },
+    "Baseball|ML|pick 1.80\u20132.20|live": {
+      "n": 55,
+      "stake": 6655.0369,
+      "pnl": 5344.9588
+    },
+    "Baseball|ML|pick 1.80\u20132.20|pregame": {
+      "n": 498,
+      "stake": 85719.3297,
+      "pnl": -5940.8268
+    },
+    "Baseball|ML|short 1.12\u20131.40|live": {
+      "n": 28,
+      "stake": 5414.9738,
+      "pnl": 1329.8846
+    },
+    "Baseball|ML|short 1.12\u20131.40|pregame": {
+      "n": 1,
+      "stake": 32.0582,
+      "pnl": 12.16
+    },
+    "Baseball|spread|dog 2.20\u20133.50|live": {
+      "n": 69,
+      "stake": 3202.6882,
+      "pnl": 899.8393
+    },
+    "Baseball|spread|dog 2.20\u20133.50|pregame": {
+      "n": 420,
+      "stake": 33159.1524,
+      "pnl": -3121.2035
+    },
+    "Baseball|spread|fav 1.40\u20131.80|live": {
+      "n": 91,
+      "stake": 7498.7474,
+      "pnl": -1870.9918
+    },
+    "Baseball|spread|fav 1.40\u20131.80|pregame": {
+      "n": 772,
+      "stake": 122653.9107,
+      "pnl": 19939.1055
+    },
+    "Baseball|spread|longshot >3.50|live": {
+      "n": 101,
+      "stake": 4758.2155,
+      "pnl": -1056.5262
+    },
+    "Baseball|spread|longshot >3.50|pregame": {
+      "n": 390,
+      "stake": 21393.4298,
+      "pnl": -6543.4991
+    },
+    "Baseball|spread|pick 1.80\u20132.20|live": {
+      "n": 44,
+      "stake": 1135.8235,
+      "pnl": 266.8617
+    },
+    "Baseball|spread|pick 1.80\u20132.20|pregame": {
+      "n": 157,
+      "stake": 18790.6281,
+      "pnl": -1768.7722
+    },
+    "Baseball|spread|short 1.12\u20131.40|live": {
+      "n": 57,
+      "stake": 11021.7865,
+      "pnl": -624.47
+    },
+    "Baseball|spread|short 1.12\u20131.40|pregame": {
+      "n": 223,
+      "stake": 71870.0594,
+      "pnl": 8015.0362
+    },
+    "Baseball|totals|dog 2.20\u20133.50|live": {
+      "n": 168,
+      "stake": 10269.1034,
+      "pnl": 962.6122
+    },
+    "Baseball|totals|dog 2.20\u20133.50|pregame": {
+      "n": 934,
+      "stake": 89914.7661,
+      "pnl": 2105.4567
+    },
+    "Baseball|totals|fav 1.40\u20131.80|live": {
+      "n": 101,
+      "stake": 11930.8415,
+      "pnl": -304.1931
+    },
+    "Baseball|totals|fav 1.40\u20131.80|pregame": {
+      "n": 672,
+      "stake": 136438.2733,
+      "pnl": -15994.07
+    },
+    "Baseball|totals|hammer \u22641.12|live": {
+      "n": 1,
+      "stake": 17.7488,
+      "pnl": 2.11
+    },
+    "Baseball|totals|longshot >3.50|live": {
+      "n": 65,
+      "stake": 1795.8827,
+      "pnl": -325.6703
+    },
+    "Baseball|totals|longshot >3.50|pregame": {
+      "n": 125,
+      "stake": 11593.7339,
+      "pnl": -443.3921
+    },
+    "Baseball|totals|pick 1.80\u20132.20|live": {
+      "n": 120,
+      "stake": 8847.0704,
+      "pnl": 3.9468
+    },
+    "Baseball|totals|pick 1.80\u20132.20|pregame": {
+      "n": 1577,
+      "stake": 225602.7427,
+      "pnl": -12233.3755
+    },
+    "Baseball|totals|short 1.12\u20131.40|live": {
+      "n": 52,
+      "stake": 6857.4367,
+      "pnl": -365.66
+    },
+    "Baseball|totals|short 1.12\u20131.40|pregame": {
+      "n": 3,
+      "stake": 488.0703,
+      "pnl": 145.5236
+    },
+    "Basketball|ML|dog 2.20\u20133.50|live": {
+      "n": 92,
+      "stake": 9018.941,
+      "pnl": -3140.2238
+    },
+    "Basketball|ML|dog 2.20\u20133.50|pregame": {
+      "n": 163,
+      "stake": 6824.2149,
+      "pnl": 5809.4558
+    },
+    "Basketball|ML|fav 1.40\u20131.80|live": {
+      "n": 54,
+      "stake": 7371.9441,
+      "pnl": -1429.7964
+    },
+    "Basketball|ML|fav 1.40\u20131.80|pregame": {
+      "n": 233,
+      "stake": 28652.4701,
+      "pnl": -13479.193
+    },
+    "Basketball|ML|hammer \u22641.12|live": {
+      "n": 7,
+      "stake": 1605.2055,
+      "pnl": 166.4507
+    },
+    "Basketball|ML|hammer \u22641.12|pregame": {
+      "n": 3,
+      "stake": 213.7016,
+      "pnl": 24.1867
+    },
+    "Basketball|ML|longshot >3.50|live": {
+      "n": 60,
+      "stake": 1225.1561,
+      "pnl": 726.9435
+    },
+    "Basketball|ML|longshot >3.50|pregame": {
+      "n": 98,
+      "stake": 2990.271,
+      "pnl": -2493.2053
+    },
+    "Basketball|ML|pick 1.80\u20132.20|live": {
+      "n": 94,
+      "stake": 15509.5682,
+      "pnl": 5499.9705
+    },
+    "Basketball|ML|pick 1.80\u20132.20|pregame": {
+      "n": 154,
+      "stake": 16328.4528,
+      "pnl": 721.6901
+    },
+    "Basketball|ML|short 1.12\u20131.40|live": {
+      "n": 46,
+      "stake": 7100.0084,
+      "pnl": 590.4854
+    },
+    "Basketball|ML|short 1.12\u20131.40|pregame": {
+      "n": 178,
+      "stake": 11101.2472,
+      "pnl": -635.1102
+    },
+    "Basketball|spread|dog 2.20\u20133.50|live": {
+      "n": 82,
+      "stake": 3687.8642,
+      "pnl": 1062.4161
+    },
+    "Basketball|spread|dog 2.20\u20133.50|pregame": {
+      "n": 503,
+      "stake": 23777.7699,
+      "pnl": 2526.0501
+    },
+    "Basketball|spread|fav 1.40\u20131.80|live": {
+      "n": 204,
+      "stake": 6493.6476,
+      "pnl": 573.8238
+    },
+    "Basketball|spread|fav 1.40\u20131.80|pregame": {
+      "n": 241,
+      "stake": 12863.4699,
+      "pnl": -2141.2552
+    },
+    "Basketball|spread|hammer \u22641.12|live": {
+      "n": 7,
+      "stake": 559.68,
+      "pnl": 44.3325
+    },
+    "Basketball|spread|hammer \u22641.12|pregame": {
+      "n": 12,
+      "stake": 4782.4989,
+      "pnl": 326.6027
+    },
+    "Basketball|spread|longshot >3.50|live": {
+      "n": 18,
+      "stake": 276.4527,
+      "pnl": -172.6652
+    },
+    "Basketball|spread|longshot >3.50|pregame": {
+      "n": 236,
+      "stake": 6355.3773,
+      "pnl": -4800.3756
+    },
+    "Basketball|spread|pick 1.80\u20132.20|live": {
+      "n": 193,
+      "stake": 14779.5563,
+      "pnl": 2161.6065
+    },
+    "Basketball|spread|pick 1.80\u20132.20|pregame": {
+      "n": 1530,
+      "stake": 94721.4508,
+      "pnl": -11669.0694
+    },
+    "Basketball|spread|short 1.12\u20131.40|live": {
+      "n": 70,
+      "stake": 5115.8815,
+      "pnl": 782.1007
+    },
+    "Basketball|spread|short 1.12\u20131.40|pregame": {
+      "n": 21,
+      "stake": 3201.4321,
+      "pnl": 48.9021
+    },
+    "Basketball|totals|dog 2.20\u20133.50|live": {
+      "n": 25,
+      "stake": 883.8047,
+      "pnl": -552.7161
+    },
+    "Basketball|totals|dog 2.20\u20133.50|pregame": {
+      "n": 291,
+      "stake": 12719.6192,
+      "pnl": -2696.71
+    },
+    "Basketball|totals|fav 1.40\u20131.80|live": {
+      "n": 71,
+      "stake": 3383.2478,
+      "pnl": -1242.8599
+    },
+    "Basketball|totals|fav 1.40\u20131.80|pregame": {
+      "n": 167,
+      "stake": 8022.5765,
+      "pnl": -1798.5641
+    },
+    "Basketball|totals|hammer \u22641.12|live": {
+      "n": 3,
+      "stake": 29.8439,
+      "pnl": 3.27
+    },
+    "Basketball|totals|longshot >3.50|live": {
+      "n": 3,
+      "stake": 36.9954,
+      "pnl": -36.9954
+    },
+    "Basketball|totals|longshot >3.50|pregame": {
+      "n": 1,
+      "stake": 39.3417,
+      "pnl": -39.3417
+    },
+    "Basketball|totals|pick 1.80\u20132.20|live": {
+      "n": 63,
+      "stake": 5361.5559,
+      "pnl": -1749.5969
+    },
+    "Basketball|totals|pick 1.80\u20132.20|pregame": {
+      "n": 1329,
+      "stake": 81231.5837,
+      "pnl": -5765.8515
+    },
+    "Basketball|totals|short 1.12\u20131.40|live": {
+      "n": 16,
+      "stake": 588.3827,
+      "pnl": -272.6148
+    },
+    "Basketball|totals|short 1.12\u20131.40|pregame": {
+      "n": 50,
+      "stake": 2030.2685,
+      "pnl": -50.2217
+    },
+    "Boxing|ML|longshot >3.50|pregame": {
+      "n": 1,
+      "stake": 0.1023,
+      "pnl": -0.1023
+    },
+    "Football|ML|dog 2.20\u20133.50|live": {
+      "n": 16,
+      "stake": 3402.4491,
+      "pnl": -2780.1046
+    },
+    "Football|ML|dog 2.20\u20133.50|pregame": {
+      "n": 37,
+      "stake": 4195.2608,
+      "pnl": 967.062
+    },
+    "Football|ML|fav 1.40\u20131.80|live": {
+      "n": 1,
+      "stake": 94.9275,
+      "pnl": 50.0
+    },
+    "Football|ML|fav 1.40\u20131.80|pregame": {
+      "n": 28,
+      "stake": 1791.8353,
+      "pnl": 824.1273
+    },
+    "Football|ML|longshot >3.50|live": {
+      "n": 19,
+      "stake": 1298.582,
+      "pnl": -1298.582
+    },
+    "Football|ML|longshot >3.50|pregame": {
+      "n": 17,
+      "stake": 600.4958,
+      "pnl": -600.4958
+    },
+    "Football|ML|pick 1.80\u20132.20|live": {
+      "n": 1,
+      "stake": 250.0,
+      "pnl": 243.8272
+    },
+    "Football|ML|pick 1.80\u20132.20|pregame": {
+      "n": 30,
+      "stake": 5851.6927,
+      "pnl": -2459.6771
+    },
+    "Football|ML|short 1.12\u20131.40|live": {
+      "n": 2,
+      "stake": 1035.2566,
+      "pnl": 242.0992
+    },
+    "Football|spread|dog 2.20\u20133.50|pregame": {
+      "n": 5,
+      "stake": 999.9966,
+      "pnl": -999.9966
+    },
+    "Football|spread|pick 1.80\u20132.20|live": {
+      "n": 7,
+      "stake": 2964.177,
+      "pnl": 567.7379
+    },
+    "Football|spread|pick 1.80\u20132.20|pregame": {
+      "n": 104,
+      "stake": 9835.6668,
+      "pnl": -2866.1455
+    },
+    "Football|totals|dog 2.20\u20133.50|pregame": {
+      "n": 2,
+      "stake": 24.7837,
+      "pnl": -24.7837
+    },
+    "Football|totals|pick 1.80\u20132.20|live": {
+      "n": 1,
+      "stake": 250.0,
+      "pnl": 250.0
+    },
+    "Football|totals|pick 1.80\u20132.20|pregame": {
+      "n": 21,
+      "stake": 3117.1638,
+      "pnl": 181.772
+    },
+    "Golf|type-274|longshot >3.50|pregame": {
+      "n": 1,
+      "stake": 499.9993,
+      "pnl": -499.9993
+    },
+    "Hockey|ML|dog 2.20\u20133.50|live": {
+      "n": 7,
+      "stake": 173.8248,
+      "pnl": 62.7227
+    },
+    "Hockey|ML|dog 2.20\u20133.50|pregame": {
+      "n": 101,
+      "stake": 11848.9325,
+      "pnl": 6647.3033
+    },
+    "Hockey|ML|fav 1.40\u20131.80|live": {
+      "n": 10,
+      "stake": 1282.7634,
+      "pnl": 808.3339
+    },
+    "Hockey|ML|fav 1.40\u20131.80|pregame": {
+      "n": 64,
+      "stake": 8427.7172,
+      "pnl": -2494.4259
+    },
+    "Hockey|ML|hammer \u22641.12|live": {
+      "n": 1,
+      "stake": 285.7895,
+      "pnl": -285.7895
+    },
+    "Hockey|ML|longshot >3.50|live": {
+      "n": 19,
+      "stake": 881.867,
+      "pnl": -881.867
+    },
+    "Hockey|ML|longshot >3.50|pregame": {
+      "n": 2,
+      "stake": 209.3812,
+      "pnl": 367.1094
+    },
+    "Hockey|ML|pick 1.80\u20132.20|live": {
+      "n": 31,
+      "stake": 1558.566,
+      "pnl": 188.5054
+    },
+    "Hockey|ML|pick 1.80\u20132.20|pregame": {
+      "n": 112,
+      "stake": 14945.9865,
+      "pnl": -2859.9372
+    },
+    "Hockey|ML|short 1.12\u20131.40|live": {
+      "n": 8,
+      "stake": 391.4634,
+      "pnl": 147.0
+    },
+    "Hockey|ML|short 1.12\u20131.40|pregame": {
+      "n": 2,
+      "stake": 169.9103,
+      "pnl": 67.4586
+    },
+    "Hockey|spread|dog 2.20\u20133.50|pregame": {
+      "n": 8,
+      "stake": 510.7675,
+      "pnl": -503.2487
+    },
+    "Hockey|spread|fav 1.40\u20131.80|pregame": {
+      "n": 34,
+      "stake": 2321.6834,
+      "pnl": 539.5971
+    },
+    "Hockey|spread|hammer \u22641.12|pregame": {
+      "n": 2,
+      "stake": 266.7486,
+      "pnl": 26.01
+    },
+    "Hockey|spread|longshot >3.50|pregame": {
+      "n": 5,
+      "stake": 476.9646,
+      "pnl": -476.9646
+    },
+    "Hockey|spread|short 1.12\u20131.40|pregame": {
+      "n": 10,
+      "stake": 1220.9017,
+      "pnl": 256.0877
+    },
+    "Hockey|totals|dog 2.20\u20133.50|live": {
+      "n": 2,
+      "stake": 150.0,
+      "pnl": -150.0
+    },
+    "Hockey|totals|dog 2.20\u20133.50|pregame": {
+      "n": 12,
+      "stake": 249.1435,
+      "pnl": -77.0487
+    },
+    "Hockey|totals|fav 1.40\u20131.80|pregame": {
+      "n": 6,
+      "stake": 286.8079,
+      "pnl": 64.1067
+    },
+    "Hockey|totals|longshot >3.50|pregame": {
+      "n": 3,
+      "stake": 26.6308,
+      "pnl": -4.1403
+    },
+    "Hockey|totals|pick 1.80\u20132.20|live": {
+      "n": 4,
+      "stake": 1150.0,
+      "pnl": -1150.0
+    },
+    "Hockey|totals|pick 1.80\u20132.20|pregame": {
+      "n": 39,
+      "stake": 4850.0702,
+      "pnl": -247.1212
+    },
+    "Mixed Martial Arts|ML|dog 2.20\u20133.50|pregame": {
+      "n": 8,
+      "stake": 557.5981,
+      "pnl": -557.5981
+    },
+    "Mixed Martial Arts|ML|fav 1.40\u20131.80|pregame": {
+      "n": 4,
+      "stake": 120.5777,
+      "pnl": 80.6238
+    },
+    "Mixed Martial Arts|ML|longshot >3.50|pregame": {
+      "n": 11,
+      "stake": 83.1341,
+      "pnl": -12.6847
+    },
+    "Mixed Martial Arts|ML|pick 1.80\u20132.20|pregame": {
+      "n": 20,
+      "stake": 1524.9106,
+      "pnl": -1247.8522
+    },
+    "Mixed Martial Arts|ML|short 1.12\u20131.40|pregame": {
+      "n": 3,
+      "stake": 49.1851,
+      "pnl": -10.8731
+    },
+    "Soccer|ML|dog 2.20\u20133.50|live": {
+      "n": 3,
+      "stake": 161.3264,
+      "pnl": -135.7364
+    },
+    "Soccer|ML|dog 2.20\u20133.50|pregame": {
+      "n": 63,
+      "stake": 1486.7885,
+      "pnl": -724.3097
+    },
+    "Soccer|ML|fav 1.40\u20131.80|live": {
+      "n": 14,
+      "stake": 696.6429,
+      "pnl": -20.5277
+    },
+    "Soccer|ML|fav 1.40\u20131.80|pregame": {
+      "n": 72,
+      "stake": 2911.3344,
+      "pnl": 58.5185
+    },
+    "Soccer|ML|hammer \u22641.12|pregame": {
+      "n": 6,
+      "stake": 734.5005,
+      "pnl": 41.22
+    },
+    "Soccer|ML|longshot >3.50|live": {
+      "n": 4,
+      "stake": 16.6722,
+      "pnl": -16.1227
+    },
+    "Soccer|ML|longshot >3.50|pregame": {
+      "n": 45,
+      "stake": 1646.3623,
+      "pnl": -851.6189
+    },
+    "Soccer|ML|pick 1.80\u20132.20|live": {
+      "n": 2,
+      "stake": 71.8759,
+      "pnl": -39.6301
+    },
+    "Soccer|ML|pick 1.80\u20132.20|pregame": {
+      "n": 63,
+      "stake": 4724.0931,
+      "pnl": -544.7148
+    },
+    "Soccer|ML|short 1.12\u20131.40|live": {
+      "n": 1,
+      "stake": 25.8744,
+      "pnl": 10.0
+    },
+    "Soccer|ML|short 1.12\u20131.40|pregame": {
+      "n": 41,
+      "stake": 4341.0328,
+      "pnl": 262.977
+    },
+    "Soccer|spread|dog 2.20\u20133.50|live": {
+      "n": 82,
+      "stake": 4505.7134,
+      "pnl": -1679.13
+    },
+    "Soccer|spread|dog 2.20\u20133.50|pregame": {
+      "n": 2141,
+      "stake": 296881.385,
+      "pnl": 45360.9257
+    },
+    "Soccer|spread|fav 1.40\u20131.80|live": {
+      "n": 109,
+      "stake": 16486.0817,
+      "pnl": -3908.3545
+    },
+    "Soccer|spread|fav 1.40\u20131.80|pregame": {
+      "n": 1660,
+      "stake": 256826.7323,
+      "pnl": 25148.5369
+    },
+    "Soccer|spread|hammer \u22641.12|live": {
+      "n": 20,
+      "stake": 7388.3389,
+      "pnl": 621.8128
+    },
+    "Soccer|spread|hammer \u22641.12|pregame": {
+      "n": 21,
+      "stake": 8834.668,
+      "pnl": -220.9019
+    },
+    "Soccer|spread|longshot >3.50|live": {
+      "n": 79,
+      "stake": 4870.6459,
+      "pnl": 3259.2104
+    },
+    "Soccer|spread|longshot >3.50|pregame": {
+      "n": 1048,
+      "stake": 45056.2226,
+      "pnl": 4127.2811
+    },
+    "Soccer|spread|pick 1.80\u20132.20|live": {
+      "n": 120,
+      "stake": 5949.1821,
+      "pnl": -1295.7589
+    },
+    "Soccer|spread|pick 1.80\u20132.20|pregame": {
+      "n": 2044,
+      "stake": 442178.5589,
+      "pnl": -69121.0678
+    },
+    "Soccer|spread|short 1.12\u20131.40|live": {
+      "n": 112,
+      "stake": 25124.6566,
+      "pnl": 985.8437
+    },
+    "Soccer|spread|short 1.12\u20131.40|pregame": {
+      "n": 656,
+      "stake": 96280.0005,
+      "pnl": -4822.9611
+    },
+    "Soccer|totals|dog 2.20\u20133.50|live": {
+      "n": 189,
+      "stake": 20655.341,
+      "pnl": -9894.968
+    },
+    "Soccer|totals|dog 2.20\u20133.50|pregame": {
+      "n": 2254,
+      "stake": 219778.3969,
+      "pnl": 17773.6563
+    },
+    "Soccer|totals|fav 1.40\u20131.80|live": {
+      "n": 206,
+      "stake": 55059.6804,
+      "pnl": -8527.5668
+    },
+    "Soccer|totals|fav 1.40\u20131.80|pregame": {
+      "n": 2941,
+      "stake": 333018.1908,
+      "pnl": -10977.9969
+    },
+    "Soccer|totals|hammer \u22641.12|live": {
+      "n": 13,
+      "stake": 4000.4457,
+      "pnl": 354.4404
+    },
+    "Soccer|totals|hammer \u22641.12|pregame": {
+      "n": 142,
+      "stake": 31272.3078,
+      "pnl": 1969.7008
+    },
+    "Soccer|totals|longshot >3.50|live": {
+      "n": 181,
+      "stake": 5730.386,
+      "pnl": -3271.169
+    },
+    "Soccer|totals|longshot >3.50|pregame": {
+      "n": 1282,
+      "stake": 31237.5604,
+      "pnl": -6324.384
+    },
+    "Soccer|totals|pick 1.80\u20132.20|live": {
+      "n": 167,
+      "stake": 15414.1194,
+      "pnl": -72.111
+    },
+    "Soccer|totals|pick 1.80\u20132.20|pregame": {
+      "n": 2131,
+      "stake": 544697.6254,
+      "pnl": -122332.8427
+    },
+    "Soccer|totals|short 1.12\u20131.40|live": {
+      "n": 162,
+      "stake": 63140.0254,
+      "pnl": 6794.606
+    },
+    "Soccer|totals|short 1.12\u20131.40|pregame": {
+      "n": 2179,
+      "stake": 142317.919,
+      "pnl": -28061.0993
+    },
+    "Soccer|type-1|dog 2.20\u20133.50|live": {
+      "n": 453,
+      "stake": 45124.4326,
+      "pnl": 6948.7312
+    },
+    "Soccer|type-1|dog 2.20\u20133.50|pregame": {
+      "n": 1733,
+      "stake": 262747.9044,
+      "pnl": 45537.6413
+    },
+    "Soccer|type-1|fav 1.40\u20131.80|live": {
+      "n": 562,
+      "stake": 78871.0081,
+      "pnl": -16379.3113
+    },
+    "Soccer|type-1|fav 1.40\u20131.80|pregame": {
+      "n": 2407,
+      "stake": 528158.4223,
+      "pnl": -29420.916
+    },
+    "Soccer|type-1|hammer \u22641.12|live": {
+      "n": 51,
+      "stake": 48665.9366,
+      "pnl": 4040.4537
+    },
+    "Soccer|type-1|hammer \u22641.12|pregame": {
+      "n": 110,
+      "stake": 44251.9348,
+      "pnl": 802.0546
+    },
+    "Soccer|type-1|longshot >3.50|live": {
+      "n": 518,
+      "stake": 16559.589,
+      "pnl": -6330.0238
+    },
+    "Soccer|type-1|longshot >3.50|pregame": {
+      "n": 1966,
+      "stake": 104326.2929,
+      "pnl": 18652.8984
+    },
+    "Soccer|type-1|pick 1.80\u20132.20|live": {
+      "n": 313,
+      "stake": 27322.7852,
+      "pnl": -2259.0335
+    },
+    "Soccer|type-1|pick 1.80\u20132.20|pregame": {
+      "n": 1311,
+      "stake": 415463.4046,
+      "pnl": -38236.168
+    },
+    "Soccer|type-1|short 1.12\u20131.40|live": {
+      "n": 452,
+      "stake": 103205.6082,
+      "pnl": 7794.7965
+    },
+    "Soccer|type-1|short 1.12\u20131.40|pregame": {
+      "n": 2024,
+      "stake": 455725.4289,
+      "pnl": 22789.0725
+    },
+    "Tennis|ML|dog 2.20\u20133.50|live": {
+      "n": 750,
+      "stake": 48016.9137,
+      "pnl": -6009.8814
+    },
+    "Tennis|ML|dog 2.20\u20133.50|pregame": {
+      "n": 889,
+      "stake": 102716.1185,
+      "pnl": 5769.0494
+    },
+    "Tennis|ML|fav 1.40\u20131.80|live": {
+      "n": 460,
+      "stake": 70770.8881,
+      "pnl": -2526.2666
+    },
+    "Tennis|ML|fav 1.40\u20131.80|pregame": {
+      "n": 1171,
+      "stake": 139527.4064,
+      "pnl": 10487.6271
+    },
+    "Tennis|ML|hammer \u22641.12|live": {
+      "n": 26,
+      "stake": 8251.7202,
+      "pnl": 518.1244
+    },
+    "Tennis|ML|hammer \u22641.12|pregame": {
+      "n": 18,
+      "stake": 2094.8843,
+      "pnl": 206.5331
+    },
+    "Tennis|ML|longshot >3.50|live": {
+      "n": 566,
+      "stake": 34286.6172,
+      "pnl": 6580.4767
+    },
+    "Tennis|ML|longshot >3.50|pregame": {
+      "n": 385,
+      "stake": 25964.9399,
+      "pnl": -2826.1644
+    },
+    "Tennis|ML|pick 1.80\u20132.20|live": {
+      "n": 376,
+      "stake": 27544.4762,
+      "pnl": -5337.2654
+    },
+    "Tennis|ML|pick 1.80\u20132.20|pregame": {
+      "n": 718,
+      "stake": 85572.6463,
+      "pnl": -8135.634
+    },
+    "Tennis|ML|short 1.12\u20131.40|live": {
+      "n": 275,
+      "stake": 60399.1546,
+      "pnl": 1097.2887
+    },
+    "Tennis|ML|short 1.12\u20131.40|pregame": {
+      "n": 331,
+      "stake": 47373.711,
+      "pnl": 537.3252
+    },
+    "Tennis|type-166|fav 1.40\u20131.80|pregame": {
+      "n": 7,
+      "stake": 767.3207,
+      "pnl": -767.3207
+    },
+    "Tennis|type-166|pick 1.80\u20132.20|pregame": {
+      "n": 77,
+      "stake": 9247.0104,
+      "pnl": -3122.1167
+    },
+    "Tennis|type-201|dog 2.20\u20133.50|live": {
+      "n": 1,
+      "stake": 574.5033,
+      "pnl": 750.0
+    },
+    "Tennis|type-201|dog 2.20\u20133.50|pregame": {
+      "n": 4,
+      "stake": 304.643,
+      "pnl": -294.0
+    },
+    "Tennis|type-201|fav 1.40\u20131.80|pregame": {
+      "n": 1,
+      "stake": 500.0,
+      "pnl": 365.8009
+    },
+    "Tennis|type-201|pick 1.80\u20132.20|live": {
+      "n": 10,
+      "stake": 686.559,
+      "pnl": -317.8419
+    },
+    "Tennis|type-201|pick 1.80\u20132.20|pregame": {
+      "n": 250,
+      "stake": 68667.6677,
+      "pnl": 1411.0752
+    },
+    "Tennis|type-202|dog 2.20\u20133.50|live": {
+      "n": 1,
+      "stake": 32.1221,
+      "pnl": 72.34
+    },
+    "Tennis|type-202|dog 2.20\u20133.50|pregame": {
+      "n": 7,
+      "stake": 807.0827,
+      "pnl": 375.115
+    },
+    "Tennis|type-202|longshot >3.50|pregame": {
+      "n": 1,
+      "stake": 500.0,
+      "pnl": -500.0
+    },
+    "Tennis|type-203|dog 2.20\u20133.50|pregame": {
+      "n": 8,
+      "stake": 399.9951,
+      "pnl": -399.9951
+    },
+    "Tennis|type-203|longshot >3.50|live": {
+      "n": 3,
+      "stake": 404.9986,
+      "pnl": -404.9986
+    },
+    "Tennis|type-203|longshot >3.50|pregame": {
+      "n": 4,
+      "stake": 176.1898,
+      "pnl": 442.0199
+    },
+    "Tennis|type-203|pick 1.80\u20132.20|live": {
+      "n": 4,
+      "stake": 288.6638,
+      "pnl": 252.1583
+    },
+    "Tennis|type-866|dog 2.20\u20133.50|live": {
+      "n": 3,
+      "stake": 521.4037,
+      "pnl": -521.4037
+    },
+    "Tennis|type-866|dog 2.20\u20133.50|pregame": {
+      "n": 92,
+      "stake": 32456.0502,
+      "pnl": -12148.862
+    },
+    "Tennis|type-866|longshot >3.50|live": {
+      "n": 1,
+      "stake": 299.9995,
+      "pnl": -299.9995
+    },
+    "Tennis|type-866|longshot >3.50|pregame": {
+      "n": 39,
+      "stake": 9412.6629,
+      "pnl": 7111.8857
+    },
+    "Tennis|type-866|pick 1.80\u20132.20|live": {
+      "n": 6,
+      "stake": 1574.1777,
+      "pnl": -769.12
+    },
+    "Tennis|type-866|pick 1.80\u20132.20|pregame": {
+      "n": 15,
+      "stake": 8149.9935,
+      "pnl": -2234.9527
+    }
+  }
+}

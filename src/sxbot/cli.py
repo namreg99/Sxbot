@@ -81,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Rank archived wallets that mostly make, by settled fill ROI",
     )
     sub.add_parser(
+        "fit",
+        help="Fit the maker fill-ROI table from sxbot-history.sqlite (not a neural net)",
+    )
+    sub.add_parser(
         "overlap",
         help="V2 only: did labeled makers/takers sit on the same side our classifier flagged?",
     )
@@ -121,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_profiles(settings)
     if args.cmd == "makers":
         return cmd_makers(settings)
+    if args.cmd == "fit":
+        return cmd_fit(settings)
     if args.cmd == "overlap":
         print(format_overlap_report(load_jsonl(settings.flow_log)))
         return 0
@@ -397,6 +403,24 @@ def cmd_makers(settings: Settings) -> int:
     return 0
 
 
+def cmd_fit(settings: Settings) -> int:
+    from pathlib import Path
+
+    from sxbot.archive import HistoryStore
+    from sxbot.learn import fit_maker_model, format_maker_model
+
+    sqlite = Path(settings.archive_path)
+    if not sqlite.exists():
+        print(f"No archive at {sqlite}. Run `sxbot archive` first.")
+        return 1
+    with HistoryStore(sqlite) as store:
+        model = fit_maker_model(store, prior_stake=settings.mm_fit_prior_stake)
+    model.save(settings.mm_model_path)
+    print(format_maker_model(model))
+    print(f"\nwrote {settings.mm_model_path}")
+    return 0
+
+
 def cmd_profiles(settings: Settings) -> int:
     from sxbot.archive import HistoryStore, format_style_profiles, load_profiles
 
@@ -428,7 +452,8 @@ def cmd_mm(client: SxClient, settings: Settings, *, once: bool) -> int:
     bot = MakerBot(settings, client)
     print(
         f"pregame ghost maker  dry_run={settings.dry_run}  two_sided={settings.mm_two_sided}  "
-        f"log={mm_log_path(settings)}  stake={settings.stake_usdc} USDC, pull at kickoff"
+        f"log={mm_log_path(settings)}  stake={settings.stake_usdc} USDC, pull at kickoff  "
+        f"model={'on' if bot.model is not None else 'off'}"
     )
     if once:
         n = bot.step()

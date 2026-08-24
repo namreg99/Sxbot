@@ -104,6 +104,10 @@ class Settings:
     mm_min_decimal: float = 1.12
     # False = ghost-quote the heavy side only (extract trainer). True = classic two-sided MM.
     mm_two_sided: bool = False
+    # Empirical-Bayes maker fill-ROI floor. 0 = skip cells that shrink to red.
+    mm_min_roi: float = 0.0
+    mm_model_path: str = "sxbot-maker-model.json"
+    mm_fit_prior_stake: float = 25_000.0
     # Paper taker Kelly. 0.625 is between half-Kelly (moderate) and 3/4 (aggressive).
     bankroll_usdc: float = 1000.0
     kelly_fraction: float = 0.625
@@ -171,6 +175,9 @@ class Settings:
             mm_min_overround_bps=int(os.getenv("SX_MM_MIN_OVERROUND_BPS", "25")),
             mm_min_decimal=float(os.getenv("SX_MM_MIN_DECIMAL", "1.12")),
             mm_two_sided=_bool("SX_MM_TWO_SIDED", False),
+            mm_min_roi=float(os.getenv("SX_MM_MIN_ROI", "0")),
+            mm_model_path=os.getenv("SX_MM_MODEL_PATH", "sxbot-maker-model.json"),
+            mm_fit_prior_stake=float(os.getenv("SX_MM_FIT_PRIOR_STAKE", "25000")),
             bankroll_usdc=float(os.getenv("SX_BANKROLL_USDC", "1000")),
             kelly_fraction=float(os.getenv("SX_KELLY_FRACTION", "0.625")),
             kelly_max_frac=float(os.getenv("SX_KELLY_MAX_FRAC", "0.05")),

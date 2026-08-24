@@ -32,6 +32,7 @@ from sxbot.filters import (
     order_skip_reason,
 )
 from sxbot.journal import load_jsonl, paper_log_for
+from sxbot.learn import MakerModel, load_or_fit_maker_model
 from sxbot.models import Action, Market, PublicTrade, Side, Signal
 from sxbot.orderbook import BookView
 from sxbot.risk import RiskGate
@@ -84,6 +85,7 @@ class QuotePair:
     odds_one: int | None
     odds_two: int | None
     reason: str
+    roi: float | None = None
 
 
 def mm_eligible(market: Market, settings: Settings, *, now: int | None = None) -> str | None:
@@ -132,13 +134,37 @@ def _within_ticks(have: int, want: int, ladder: OddsLadder, ticks: int) -> bool:
     return abs(have - want) <= ticks * ladder.step
 
 
-def _ghost_pair(market: Market, view: BookView, side: Side, price: int, *, held: bool) -> QuotePair:
+def _ghost_pair(
+    market: Market,
+    view: BookView,
+    side: Side,
+    price: int,
+    *,
+    held: bool,
+    roi: float | None = None,
+) -> QuotePair:
     style = mm_quote_style(market, price) or mm_family(market) or "mm"
     imb = f"imb {view.imbalance:+.2f}"
     verb = "hold" if held else "ghost"
+    roi_bit = f", roi {roi*100:+.1f}%" if roi is not None else ""
     if side is Side.OUTCOME_ONE:
-        return QuotePair(price, None, f"{verb} {style} O1 ({imb})")
-    return QuotePair(None, price, f"{verb} {style} O2 ({imb})")
+        return QuotePair(price, None, f"{verb} {style} O1 ({imb}{roi_bit})", roi)
+    return QuotePair(None, price, f"{verb} {style} O2 ({imb}{roi_bit})", roi)
+
+
+def _model_roi(
+    market: Market,
+    price: int,
+    settings: Settings,
+    model: MakerModel | None,
+    *,
+    now: int | None = None,
+) -> float | None:
+    """None = skip this price. 0.0 if no model is loaded (hardcoded bands only)."""
+    if model is None:
+        return 0.0
+    floor = float(getattr(settings, "mm_min_roi", 0) or 0)
+    return model.allow(market, price, floor, now=now)
 
 
 def quote_pair(
@@ -149,6 +175,7 @@ def quote_pair(
     resting: MMResting | None = None,
     *,
     now: int | None = None,
+    model: MakerModel | None = None,
 ) -> QuotePair | None:
     """Ghost quote: one tick behind. Default one heavy side; optional two-sided."""
     why = mm_eligible(market, settings, now=now)
@@ -186,14 +213,20 @@ def quote_pair(
             keep = have if held else price
             if mm_quote_style(market, keep) is None:
                 return None
-            return _ghost_pair(market, view, live_side, keep, held=held)
+            roi = _model_roi(market, keep, settings, model, now=now)
+            if roi is None:
+                return None
+            return _ghost_pair(market, view, live_side, keep, held=held, roi=roi)
         side = liquidity_side(view, settings)
         if side is None:
             return None
         price = _join_price(view, side, ladder, behind, settings)
         if price is None or mm_quote_style(market, price) is None:
             return None
-        return _ghost_pair(market, view, side, price, held=False)
+        roi = _model_roi(market, price, settings, model, now=now)
+        if roi is None:
+            return None
+        return _ghost_pair(market, view, side, price, held=False, roi=roi)
 
     want_one = not filled_one
     want_two = not filled_two
@@ -301,6 +334,17 @@ class MakerBot:
         self.inner.risk.hydrate(load_jsonl(mm_log))
         self.resting: dict[str, MMResting] = {}
         self._restore_resting(load_jsonl(mm_log))
+        self.model = load_or_fit_maker_model(mm_settings)
+        if self.model is not None:
+            log.info(
+                "maker model %s  fills=%s cells=%s prior=$%s",
+                self.model.fitted_at or "loaded",
+                self.model.fills,
+                len(self.model.cells),
+                int(self.model.prior_stake),
+            )
+        else:
+            log.info("no maker model (run `sxbot fit` after `sxbot archive`) — hardcoded bands only")
 
     def _restore_resting(self, rows: list[dict[str, Any]]) -> None:
         last: dict[str, MMResting] = {}
@@ -362,13 +406,19 @@ class MakerBot:
             return executed
         if live_or_gone:
             return executed
-        desired = quote_pair(market, view, self.inner.ladder, self.settings, slot, now=now)
+        desired = quote_pair(
+            market, view, self.inner.ladder, self.settings, slot, now=now, model=self.model
+        )
         if desired is None:
             if slot and slot.live_quote:
                 executed += self._cancel_resting(market, view, "no longer quoteable")
             return executed
-        executed += self._sync_side(market, view, Side.OUTCOME_ONE, desired.odds_one, desired.reason)
-        executed += self._sync_side(market, view, Side.OUTCOME_TWO, desired.odds_two, desired.reason)
+        executed += self._sync_side(
+            market, view, Side.OUTCOME_ONE, desired.odds_one, desired.reason, roi=desired.roi
+        )
+        executed += self._sync_side(
+            market, view, Side.OUTCOME_TWO, desired.odds_two, desired.reason, roi=desired.roi
+        )
         return executed
 
     def _match_fills(self, market: Market, view: BookView, trades: list[PublicTrade]) -> int:
@@ -407,6 +457,8 @@ class MakerBot:
         side: Side,
         want: int | None,
         reason: str,
+        *,
+        roi: float | None = None,
     ) -> int:
         slot = self.resting.setdefault(market.market_hash, MMResting())
         have = slot.odds(side)
@@ -434,6 +486,8 @@ class MakerBot:
                 "size_two": view.size_two,
                 "imbalance": view.imbalance,
                 "mm_style": mm_quote_style(market, want),
+                "fill_roi": None if roi is None else round(roi, 4),
+                "rewards": "unmatched_live_only",
             },
         )
         if not replacing:
@@ -478,11 +532,17 @@ class MakerBot:
 
     def run(self) -> None:
         log.info(
-            "starting pregame ghost maker dry_run=%s two_sided=%s stake=%s open_cap=%s",
+            "starting pregame ghost maker dry_run=%s two_sided=%s stake=%s open_cap=%s model=%s",
             self.settings.dry_run,
             self.settings.mm_two_sided,
             self.settings.stake_usdc,
             self.settings.max_open_markets,
+            "on" if self.model is not None else "off",
+        )
+        log.info(
+            "maker rewards: paper cannot collect. live needs typically $100, "
+            "beat the orange global line (not on the REST book), unmatched ≥10s, mainline. "
+            "A tape fill stops reward points — this trainer scores fill ROI, not the prize pool."
         )
         try:
             while True:
