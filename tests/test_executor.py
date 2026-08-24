@@ -77,3 +77,23 @@ def test_dry_run_writes_style_paper_log(tmp_path) -> None:
     line = styled.read_text(encoding="utf-8")
     assert '"style": "mlb"' in line
     assert '"event_id": "L1"' in line
+
+
+def test_unstyled_write_does_not_recreate_main_dump(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    executor = Executor(make_settings(paper_log=str(paper)), _meta(), client=None)
+    signal = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=52_875_000_000_000_000_000,
+        reason="makers shifted",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+    )
+    executor.execute(signal, 5_000_000)
+    assert not paper.exists()
+    legacy = tmp_path / "sxbot-paper-legacy.jsonl"
+    assert legacy.exists()
+    assert "join_maker" in legacy.read_text(encoding="utf-8")

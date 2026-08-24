@@ -59,18 +59,44 @@ def _short_addr(addr: str) -> str:
     return a or "?"
 
 
-def _windows(start: int, end: int, step: int) -> list[tuple[int, int]]:
+def _windows(start: int, end: int, step: int, *, newest_first: bool = False) -> list[tuple[int, int]]:
     out: list[tuple[int, int]] = []
     cur = start
     while cur < end:
         nxt = min(cur + step, end)
         out.append((cur, nxt))
         cur = nxt
+    if newest_first:
+        out.reverse()
+    return out
+
+
+def _tape_windows(start: int, end: int) -> list[tuple[int, int]]:
+    """Newest first. Tight recent slices so oldest-first /trades still reaches now."""
+    start, end = int(start), int(end)
+    if end <= start:
+        return []
+    out: list[tuple[int, int]] = []
+    t = end
+    recent = max(start, end - 2 * 3600)
+    while t > recent:
+        w0 = max(recent, t - 600)
+        out.append((w0, t))
+        t = w0
+    mid = max(start, end - 12 * 3600)
+    while t > mid:
+        w0 = max(mid, t - 3600)
+        out.append((w0, t))
+        t = w0
+    while t > start:
+        w0 = max(start, t - 3 * 3600)
+        out.append((w0, t))
+        t = w0
     return out
 
 
 def unique_open_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Last non-cancel join/take per market+side."""
+    """Last join/take still live. A later cancel drops that market+side."""
     last: dict[tuple[str, str], dict[str, Any]] = {}
     for row in rows:
         market = str(row.get("market") or "")
@@ -87,6 +113,20 @@ def unique_open_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return list(last.values())
 
 
+def unique_lifetime_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Last join/take/mm_fill per market+side. Kickoff cancel does not erase the card."""
+    last: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in rows:
+        market = str(row.get("market") or "")
+        side = str(row.get("side") or "")
+        if not market or not side:
+            continue
+        action = str(row.get("action") or "")
+        if action in _TRADE_ACTIONS:
+            last[(market, side)] = row
+    return list(last.values())
+
+
 def scrape_big_fills(
     client: SxClient,
     *,
@@ -94,9 +134,11 @@ def scrape_big_fills(
     end: int,
     min_usdc: float,
     step: int = 3 * 3600,
-    max_pages: int = 50,
+    max_pages: int = 20,
+    newest_first: bool = True,
+    deadline: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Pull V2 public fills ≥ min_usdc in [start, end). Oldest-first windows."""
+    """Pull V2 public fills ≥ min_usdc in [start, end). Newest windows first."""
     now = int(time.time())
     end = min(int(end), now)
     start = int(start)
@@ -104,7 +146,10 @@ def scrape_big_fills(
         return []
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
-    for w0, w1 in _windows(start, end, step):
+    windows = _tape_windows(start, end) if newest_first else _windows(start, end, step)
+    for w0, w1 in windows:
+        if deadline is not None and time.time() >= deadline:
+            break
         try:
             rows = client.v2_public_trades(start_date=w0, end_date=w1, max_pages=max_pages)
         except Exception:
@@ -219,7 +264,14 @@ def build_snapshot(
     who = _who_map(settings)
 
     if tape_rows is None:
-        tape_rows = scrape_big_fills(client, start=y0, end=now_ts, min_usdc=min_usdc)
+        tape_rows = scrape_big_fills(
+            client,
+            start=y0,
+            end=now_ts,
+            min_usdc=min_usdc,
+            newest_first=True,
+            deadline=time.time() + 45,
+        )
 
     hashes = list(
         dict.fromkeys(str(r.get("marketHash") or "") for r in tape_rows if r.get("marketHash"))
@@ -238,27 +290,27 @@ def build_snapshot(
     today_fills = [f for f in fills if f["ts"] >= t0]
     yday_fills = [f for f in fills if y0 <= f["ts"] < t0]
 
-    unique_rows = unique_open_rows(paper_rows)
-    unique_bets = [
-        _paper_view(grade_row(row, lookup_market(markets, str(row.get("market") or ""))), row)
-        for row in unique_rows
+    def _view_row(row: dict[str, Any]) -> dict[str, Any]:
+        return _paper_view(grade_row(row, lookup_market(markets, str(row.get("market") or ""))), row)
+
+    life_bets = [_view_row(row) for row in unique_lifetime_rows(paper_rows)]
+    open_bets = [
+        b
+        for b in (_view_row(row) for row in unique_open_rows(paper_rows))
+        if b["result"] in {"pending", "missing"}
     ]
-    feed_src = [r for r in paper_rows if str(r.get("action") or "") in _TRADE_ACTIONS | {"cancel"}]
-    feed_src = feed_src[-40:]
-    feed = [
-        _paper_view(grade_row(row, lookup_market(markets, str(row.get("market") or ""))), row)
-        for row in reversed(feed_src)
-    ]
-    open_bets = [b for b in unique_bets if b["result"] in {"pending", "missing"}]
     open_bets.sort(key=lambda b: float(b.get("odds_pct") or 0), reverse=True)
     best_open = open_bets[0] if open_bets else None
-    settled = [b for b in unique_bets if b["result"] in {"win", "lose"}]
+    settled = [b for b in life_bets if b["result"] in {"win", "lose"}]
     best_priced = [
         b for b in settled if b.get("decimal") and float(b["decimal"]) <= BEST_PRICED_MAX_DECIMAL
     ]
     by_style: dict[str, list[dict[str, Any]]] = {}
-    for bet in unique_bets:
+    for bet in life_bets:
         by_style.setdefault(str(bet.get("style") or "legacy"), []).append(bet)
+    feed_src = [r for r in paper_rows if str(r.get("action") or "") in _TRADE_ACTIONS | {"cancel"}]
+    feed_src = feed_src[-40:]
+    feed = [_view_row(row) for row in reversed(feed_src)]
 
     return {
         "generated_at": _utc(now_ts),
@@ -270,7 +322,7 @@ def build_snapshot(
         "feed": feed,
         "open": open_bets,
         "best_open": best_open,
-        "record": _record(unique_bets),
+        "record": _record(life_bets),
         "best_priced": {
             **_record(best_priced),
             "max_decimal": BEST_PRICED_MAX_DECIMAL,
@@ -361,8 +413,8 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
     tape_note = ""
     if not snap.get("tape_fills"):
         tape_note = (
-            "<p class='note'>5k+ tape is still scraping (V2 /trades is oldest-first; "
-            "first load can take a minute). Paper updates immediately.</p>"
+            "<p class='note'>5k+ tape scrapes newest-first in a background thread "
+            "(V2 /trades is oldest-first inside each window). Paper updates immediately.</p>"
         )
     return f"""<!doctype html>
 <html lang="en">
@@ -402,7 +454,7 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 </header>
 <div class="kpis">
   <div class="kpi"><b>best priced settled ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced")))}</div>
-  <div class="kpi"><b>all unique paper</b>{html.escape(rec(snap.get("record")))}</div>
+  <div class="kpi"><b>lifetime unique (kickoff cancel keeps the card)</b>{html.escape(rec(snap.get("record")))}</div>
   <div class="kpi"><b>best priced open</b>{html.escape(best_open_s)}</div>
   <div class="kpi"><b>5k+ today / yesterday</b>{html.escape(rec(snap.get("today_record")))} / {html.escape(rec(snap.get("yesterday_record")))}</div>
   <div class="kpi"><b>by style</b>{style_bits}</div>
@@ -452,7 +504,7 @@ def render_text(snap: dict[str, Any]) -> str:
     lines = [
         f"sxbot board  {snap.get('generated_at')}",
         rec(snap.get("best_priced"), f"best priced settled ≤{BEST_PRICED_MAX_DECIMAL:.2f}"),
-        rec(snap.get("record"), "all unique paper"),
+        rec(snap.get("record"), "lifetime unique paper"),
     ]
     best = snap.get("best_open")
     if best:
@@ -506,10 +558,39 @@ class BoardState:
         yesterday, _, current = _day_bounds()
         start, end = int(yesterday.timestamp()), int(current.timestamp())
         min_usdc = float(self.settings.big_fill_usdc or 5000)
-        rows = scrape_big_fills(self.client, start=start, end=end, min_usdc=min_usdc)
+        rows = scrape_big_fills(
+            self.client,
+            start=start,
+            end=end,
+            min_usdc=min_usdc,
+            newest_first=True,
+            deadline=time.time() + 35,
+            max_pages=15,
+        )
         with self.lock:
-            self.tape = rows
+            seen = {str(r.get("fillHash") or "") for r in self.tape}
+            merged = list(self.tape)
+            for raw in rows:
+                fh = str(raw.get("fillHash") or "")
+                if fh and fh not in seen:
+                    seen.add(fh)
+                    merged.append(raw)
+            merged = [r for r in merged if int(r.get("betTime") or 0) >= start]
+            self.tape = merged
             self.tape_at = time.time()
+
+    def _tape_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.refresh_tape(force=True)
+            except Exception:
+                log.exception("tape scrape failed")
+            self._stop.wait(90)
+
+    def start_tape_worker(self) -> threading.Thread:
+        worker = threading.Thread(target=self._tape_loop, name="sxbot-tape", daemon=True)
+        worker.start()
+        return worker
 
     def snapshot(self, *, refresh_tape: bool = False) -> dict[str, Any]:
         if refresh_tape:
@@ -567,7 +648,7 @@ class BoardState:
     def loop(self) -> None:
         while not self._stop.is_set():
             try:
-                snap = self.snapshot(refresh_tape=True)
+                snap = self.snapshot(refresh_tape=False)
                 self.maybe_telegram(snap)
             except Exception:
                 log.exception("board refresh failed")
@@ -576,6 +657,7 @@ class BoardState:
 
 def serve_board(client: SxClient, settings: Settings, *, host: str, port: int) -> None:
     state = BoardState(client, settings)
+    state.start_tape_worker()
     worker = threading.Thread(target=state.loop, name="sxbot-board", daemon=True)
     worker.start()
 

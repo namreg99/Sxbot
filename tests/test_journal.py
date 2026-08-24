@@ -1,4 +1,4 @@
-from sxbot.journal import format_summary, load_jsonl
+from sxbot.journal import format_summary, iter_paper_logs, load_follow_paper, load_jsonl
 
 
 def test_summary_empty(tmp_path) -> None:
@@ -39,6 +39,24 @@ def test_summary_includes_style_paper_logs(tmp_path) -> None:
         encoding="utf-8",
     )
     text = format_summary(flow, paper)
-    assert "sxbot-paper.jsonl" in text
+    assert "sxbot-paper.jsonl" not in text
     assert "sxbot-paper-mlb.jsonl" in text
-    assert "intended stake  10.0 USDC" in text
+    assert "intended stake  5.0 USDC" in text
+    assert [p.name for p in iter_paper_logs(paper)] == ["sxbot-paper-mlb.jsonl"]
+
+
+def test_follow_paper_drops_mm_quotes(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    mlb = tmp_path / "sxbot-paper-mlb.jsonl"
+    mm = tmp_path / "sxbot-paper-mm.jsonl"
+    mlb.write_text(
+        '{"action":"join_maker","style":"mlb","market":"0x1","side":"outcome_one","ts":1}\n',
+        encoding="utf-8",
+    )
+    mm.write_text(
+        '{"action":"join_maker","style":"mm","market":"0x2","side":"outcome_one","ts":2}\n',
+        encoding="utf-8",
+    )
+    rows = load_follow_paper(paper)
+    assert len(rows) == 1
+    assert rows[0]["style"] == "mlb"

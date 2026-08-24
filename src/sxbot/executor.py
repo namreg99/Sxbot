@@ -149,8 +149,9 @@ class Executor:
 
     def _append(self, record: dict[str, Any], signal: Signal | None = None) -> None:
         path = self.paper_path
-        if not self._paper_path_locked and signal is not None and signal.style:
-            path = paper_log_for(self.paper_path, signal.style)
+        if not self._paper_path_locked:
+            style = (signal.style if signal is not None else "") or "legacy"
+            path = paper_log_for(self.paper_path, style)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")

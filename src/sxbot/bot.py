@@ -16,7 +16,7 @@ from sxbot.executor import Executor
 from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, quote_family
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
 from sxbot.kelly import TAKE_ACTIONS
-from sxbot.journal import load_all_paper
+from sxbot.journal import load_follow_paper
 from sxbot.models import Action, Book, Market, PublicTrade, Side, Signal
 from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
@@ -47,7 +47,7 @@ class Bot:
         self._labeled = labeled_addresses(settings)
         self._quotes_by_market: dict[str, MarketQuotes] = {}
         self._takers_by_market: dict[str, dict[str, tuple[str, ...]]] = {}
-        self.risk.hydrate(load_all_paper(settings.paper_log))
+        self.risk.hydrate(load_follow_paper(settings.paper_log))
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
         now = int(time.time())

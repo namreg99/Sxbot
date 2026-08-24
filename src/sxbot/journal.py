@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from sxbot.filters import QUOTE_STYLES
+from sxbot.filters import QUOTE_STYLES, STYLE_MM
 
 
 def load_jsonl(path: str | Path) -> list[dict[str, Any]]:
@@ -34,18 +34,18 @@ def paper_log_for(path: str | Path, style: str) -> Path:
 
 
 def iter_paper_logs(path: str | Path) -> list[Path]:
-    """Main paper log plus per-style files that already exist."""
+    """Per-style paper logs. Skip the mixed unstyled dump once those exist."""
     file = Path(path)
+    style_files = [p for p in (paper_log_for(file, style) for style in QUOTE_STYLES) if p.exists()]
+    candidates = style_files if style_files else ([file] if file.exists() else [])
     out: list[Path] = []
     seen: set[Path] = set()
-    for candidate in (file, *(paper_log_for(file, style) for style in QUOTE_STYLES)):
-        resolved = candidate if not candidate.exists() else candidate.resolve()
-        key = resolved
+    for candidate in candidates:
+        key = candidate.resolve() if candidate.exists() else candidate
         if key in seen:
             continue
         seen.add(key)
-        if candidate.exists():
-            out.append(candidate)
+        out.append(candidate)
     return out
 
 
@@ -55,6 +55,11 @@ def load_all_paper(path: str | Path) -> list[dict[str, Any]]:
         rows.extend(load_jsonl(log))
     rows.sort(key=lambda row: float(row.get("ts") or 0))
     return rows
+
+
+def load_follow_paper(path: str | Path) -> list[dict[str, Any]]:
+    """`sxbot run` hydrate: style logs minus the MM ghost book."""
+    return [row for row in load_all_paper(path) if str(row.get("style") or "") != STYLE_MM]
 
 
 def _count(rows: list[dict[str, Any]], key: str) -> Counter[str]:

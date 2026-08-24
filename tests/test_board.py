@@ -1,9 +1,13 @@
 from sxbot.board import (
     _fill_view,
     _record,
+    _tape_windows,
+    _windows,
     build_snapshot,
     render_html,
     render_text,
+    scrape_big_fills,
+    unique_lifetime_rows,
     unique_open_rows,
 )
 from sxbot.units import from_percent
@@ -31,6 +35,56 @@ def test_unique_open_rows_drops_cancel_and_keeps_last_join() -> None:
     unique = unique_open_rows(rows)
     assert len(unique) == 1
     assert unique[0]["market"] == "0x2"
+
+
+def test_unique_lifetime_rows_keep_kickoff_cancel() -> None:
+    rows = [
+        {"action": "join_maker", "market": "0x1", "side": "outcome_one", "ts": 1, "odds_pct": 60},
+        {"action": "cancel", "market": "0x1", "side": "outcome_one", "ts": 3},
+        {"action": "join_maker", "market": "0x2", "side": "outcome_two", "ts": 4},
+    ]
+    life = unique_lifetime_rows(rows)
+    hashes = {row["market"] for row in life}
+    assert hashes == {"0x1", "0x2"}
+    kept = next(row for row in life if row["market"] == "0x1")
+    assert kept["action"] == "join_maker"
+    assert kept["odds_pct"] == 60
+
+
+def test_tape_windows_newest_first_and_cover() -> None:
+    start, end = 0, 15 * 3600
+    wins = _tape_windows(start, end)
+    assert wins[0][1] == end
+    assert wins[0][0] == end - 600
+    assert wins[-1][0] == start
+    covered = 0
+    prev_end = end
+    for w0, w1 in wins:
+        assert w1 == prev_end
+        covered += w1 - w0
+        prev_end = w0
+    assert covered == end - start
+    oldest = _windows(0, 9, 3)
+    newest = _windows(0, 9, 3, newest_first=True)
+    assert oldest == [(0, 3), (3, 6), (6, 9)]
+    assert newest == [(6, 9), (3, 6), (0, 3)]
+
+
+def test_scrape_newest_first_and_deadline() -> None:
+    class Rec:
+        def __init__(self) -> None:
+            self.starts: list[int] = []
+
+        def v2_public_trades(self, **kwargs):
+            self.starts.append(int(kwargs["start_date"]))
+            return []
+
+    rec = Rec()
+    scrape_big_fills(rec, start=0, end=9, min_usdc=1, step=3, newest_first=False, max_pages=1)
+    assert rec.starts == [0, 3, 6]
+    rec.starts.clear()
+    scrape_big_fills(rec, start=0, end=9, min_usdc=1, newest_first=True, deadline=0, max_pages=1)
+    assert rec.starts == []
 
 
 def test_fill_view_names_the_stored_side() -> None:
@@ -149,3 +203,43 @@ def test_record_win_pct() -> None:
     assert rec["losses"] == 1
     assert rec["pending"] == 1
     assert rec["win_pct"] == 66.7
+
+
+def test_lifetime_record_keeps_settled_after_cancel(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    odds = from_percent(70.0)
+    paper.write_text(
+        "\n".join(
+            [
+                '{"ts": 1, "action": "join_maker", "market": "0xabc", "side": "outcome_one",'
+                f' "label": "Chelsea / Not Chelsea", "league": "EPL", "odds": "{odds}",'
+                ' "odds_pct": 70.0, "stake": "5000000", "stake_usdc": 5,'
+                ' "outcome_one": "Chelsea", "outcome_two": "Not Chelsea", "style": "soccer",'
+                ' "game_time": 10}',
+                '{"ts": 20, "action": "cancel", "market": "0xabc", "side": "outcome_one",'
+                ' "label": "Chelsea / Not Chelsea", "league": "EPL",'
+                f' "odds": "{odds}", "odds_pct": 70.0, "stake": "5000000",'
+                ' "outcome_one": "Chelsea", "outcome_two": "Not Chelsea", "style": "soccer"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        [
+            {
+                "marketHash": "0xabc",
+                "outcomeOneName": "Chelsea",
+                "outcomeTwoName": "Not Chelsea",
+                "leagueLabel": "EPL",
+                "outcome": 1,
+                "gameTime": 10,
+            }
+        ]
+    )
+    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
+    assert snap["record"]["wins"] == 1
+    assert snap["record"]["losses"] == 0
+    assert snap["open"] == []
+    assert snap["best_priced"]["wins"] == 1
+    assert "lifetime unique" in render_text(snap)
