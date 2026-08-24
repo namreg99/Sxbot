@@ -790,6 +790,8 @@ def format_maker_roi(store: HistoryStore) -> str:
     )
     lines.append("")
     lines.append(format_maker_sport_bands(store))
+    lines.append("")
+    lines.append(format_maker_rebuild(store))
     return "\n".join(lines)
 
 
@@ -857,6 +859,70 @@ def format_maker_sport_bands(store: HistoryStore) -> str:
         "MM one-sided bands: soccer type-1 short 1.12–1.40 or dog 2.20–3.50; "
         "MLB ML fav 1.40–1.80 or dog 2.20–3.50; MLB run-line 1.12–1.80; "
         "tennis ML fav 1.40–1.80 or dog 2.20–3.50. Skip pick'em, NFL, basketball, type-52 soccer."
+    )
+    return "\n".join(lines)
+
+
+def format_maker_rebuild(store: HistoryStore) -> str:
+    """Did makers hedge by taking the other side, or press the same side?"""
+    wallets = {r["address"]: r["label"] for r in store._db.execute("SELECT address, label FROM wallets")}
+    fills = list(
+        store._db.execute(
+            """
+            SELECT wallet, is_maker, market_hash, betting_outcome_one, stake, bet_time, pnl_usdc
+            FROM fills WHERE settled=1 AND market_hash IS NOT NULL AND market_hash != ''
+            ORDER BY bet_time
+            """
+        )
+    )
+    by: dict[tuple[str, str], dict[str, list]] = defaultdict(lambda: {"m": [], "t": []})
+    for r in fills:
+        key = (str(r["wallet"]), str(r["market_hash"]))
+        by[key]["m" if int(r["is_maker"]) == 1 else "t"].append(r)
+
+    def _roi(rows: list) -> tuple[int, float, float, float]:
+        stake = sum(int(r["stake"] or 0) for r in rows) / 1e6
+        pnl = sum(float(r["pnl_usdc"] or 0) for r in rows)
+        return len(rows), stake, pnl, (100.0 * pnl / stake) if stake else 0.0
+
+    lines = [
+        "Same wallet, same market: maker fill then a later take.",
+        "Opposite-side take = hedge/arb. Same-side take = press the position (not a locked spread).",
+        f"{'wallet':<16} {'leg':<28} {'n':>5} {'stake':>10} {'pnl':>10} {'ROI%':>7}",
+    ]
+    for addr, label in wallets.items():
+        opp: list = []
+        same: list = []
+        maker_mkts = 0
+        for (wallet, _), sides in by.items():
+            if wallet != addr or not sides["m"]:
+                continue
+            maker_mkts += 1
+            first_m = min(int(r["bet_time"] or 0) for r in sides["m"])
+            m_sides = {int(r["betting_outcome_one"] or 0) for r in sides["m"]}
+            for t in sides["t"]:
+                if int(t["bet_time"] or 0) < first_m:
+                    continue
+                if int(t["betting_outcome_one"] or 0) in m_sides:
+                    same.append(t)
+                else:
+                    opp.append(t)
+        if maker_mkts < 50:
+            continue
+        for name, rows in (("opp take (hedge)", opp), ("same-side take (press)", same)):
+            n, stake, pnl, roi = _roi(rows)
+            if n < 20:
+                continue
+            lines.append(
+                f"{label:<16} {name:<28} {n:5d} {stake:10,.0f} {pnl:+10,.0f} {roi:7.1f}"
+            )
+    lines.append("")
+    lines.append(
+        "This is not a quick arb. Fast opposite takes (<5 min) are rare and tiny. "
+        "cypherprod's plus is taking MORE of the same side hours later (soccer/MLB), "
+        "not buying the other outcome to lock a spread. HedgeHog's opposite takes "
+        "do not flip their maker book green. `sxbot mm` still holds after a ghost "
+        "fill — auto-hedging would copy the worse path."
     )
     return "\n".join(lines)
 
