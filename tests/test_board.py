@@ -171,7 +171,7 @@ def test_board_snapshot_and_html(tmp_path) -> None:
     assert "Uchijima" in page
     assert "Dodgers" not in page
     text = render_text(snap)
-    assert "best priced settled" in text
+    assert "follow best priced" in text
     assert "picked Uchijima" in text
 
 
@@ -217,6 +217,71 @@ def test_record_win_pct() -> None:
     assert rec["losses"] == 1
     assert rec["pending"] == 1
     assert rec["win_pct"] == 66.7
+    assert rec["roi_pct"] is None
+
+
+def test_record_roi_uses_settled_stake() -> None:
+    rec = _record(
+        [
+            {"result": "win", "stake_usdc": 5, "pnl_usdc": 5},
+            {"result": "lose", "stake_usdc": 5, "pnl_usdc": -5},
+            {"result": "pending", "stake_usdc": 5, "pnl_usdc": None},
+        ]
+    )
+    assert rec["wins"] == 1
+    assert rec["losses"] == 1
+    assert rec["roi_pct"] == 0.0
+    assert rec["stake_usdc"] == 10.0
+
+
+def test_maker_ev_is_parked_size_not_a_fade() -> None:
+    from sxbot.board import is_maker_ev
+
+    assert is_maker_ev({"motive": "maker_steam", "side": "outcome_one", "imbalance": 0})
+    assert is_maker_ev({"side": "outcome_two", "imbalance": -0.4})
+    assert not is_maker_ev({"side": "outcome_one", "imbalance": -0.4, "motive": "tob_lag"})
+
+
+def test_follow_buckets_split_priced_vs_ev(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    short = from_percent(70.0)
+    longshot = from_percent(40.0)
+    paper.write_text(
+        "\n".join(
+            [
+                '{"ts": 1, "action": "join_maker", "market": "0x1", "side": "outcome_one",'
+                f' "label": "A / B", "league": "EPL", "odds": "{short}", "odds_pct": 70.0,'
+                ' "stake": "5000000", "stake_usdc": 5, "outcome_one": "A", "outcome_two": "B",'
+                ' "style": "soccer", "motive": "maker_steam", "imbalance": 0.4, "game_time": 10}',
+                '{"ts": 2, "action": "join_maker", "market": "0x2", "side": "outcome_one",'
+                f' "label": "C / D", "league": "ATP", "odds": "{longshot}", "odds_pct": 40.0,'
+                ' "stake": "5000000", "stake_usdc": 5, "outcome_one": "C", "outcome_two": "D",'
+                ' "style": "tennis_dog", "motive": "tob_lag", "imbalance": -0.5, "game_time": 10}',
+                '{"ts": 3, "action": "join_maker", "market": "0xmm", "side": "outcome_one",'
+                f' "label": "E / F", "league": "MLB", "odds": "{short}", "odds_pct": 70.0,'
+                ' "stake": "5000000", "stake_usdc": 5, "outcome_one": "E", "outcome_two": "F",'
+                ' "style": "mm", "motive": "mm_quote", "imbalance": 0.4, "game_time": 10}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        [
+            {"marketHash": "0x1", "outcomeOneName": "A", "outcomeTwoName": "B", "leagueLabel": "EPL", "outcome": 1, "gameTime": 10},
+            {"marketHash": "0x2", "outcomeOneName": "C", "outcomeTwoName": "D", "leagueLabel": "ATP", "outcome": 2, "gameTime": 10},
+            {"marketHash": "0xmm", "outcomeOneName": "E", "outcomeTwoName": "F", "leagueLabel": "MLB", "outcome": 1, "gameTime": 10},
+        ]
+    )
+    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
+    assert snap["best_priced"]["wins"] == 1
+    assert snap["best_priced"]["losses"] == 0
+    assert snap["maker_ev"]["wins"] == 1
+    assert snap["maker_ev"]["losses"] == 0
+    assert snap["priced_ev"]["wins"] == 1
+    assert snap["follow_record"]["wins"] == 1
+    assert snap["follow_record"]["losses"] == 1
+    assert snap["record"]["wins"] == 2
 
 
 def test_lifetime_record_keeps_settled_after_cancel(tmp_path) -> None:

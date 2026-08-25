@@ -48,6 +48,8 @@ Only while `sxbot run` is actually running. There is no background daemon. Dry-r
 
 The board **lifetime unique** card is the last join/take/fill per market+side+style (`sxbot run` and `sxbot mm` do not overwrite each other). A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side. Do not mix those two piles.
 
+Follow paper is split on the board into **best priced** (decimal ≤1.80), **maker EV** (steam / size parked on our side), and the overlap. Each card shows W–L, win%, and ROI on settled unique quotes (assumes fills). MM stays in `by style`.
+
 Live orders additionally need `SX_API_KEY`, `SX_PRIVATE_KEY`, `pip install -e ".[trade]"`, a funded proxy, and `SX_DRY_RUN=false`. Keep paper mode on until that log looks like a strategy you actually want to fund.
 
 ## Quick start
