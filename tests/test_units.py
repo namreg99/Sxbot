@@ -3,6 +3,7 @@ from sxbot.units import (
     ODDS_SCALE,
     OddsLadder,
     american,
+    complement_decimal,
     from_percent,
     payout,
     taker_capacity,
@@ -52,3 +53,11 @@ def test_american_and_usdc() -> None:
     assert american(0.6) == -150
     assert to_base_units(5) == 5_000_000
     assert to_usdc(5_000_000) == 5.0
+
+
+def test_complement_decimal_is_the_take_price() -> None:
+    # Makers on Cincy at 1.60 → taking that quote is SF at 2.67
+    assert abs(complement_decimal(1.60) - (1.60 / 0.60)) < 1e-9
+    assert round(complement_decimal(1.60), 2) == 2.67
+    assert complement_decimal(2.0) == 2.0
+    assert complement_decimal(1.0) == 0.0

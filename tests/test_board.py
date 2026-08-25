@@ -6,6 +6,7 @@ from sxbot.board import (
     _windows,
     build_snapshot,
     live_test_status,
+    make_take_line,
     paper_record,
     render_html,
     render_text,
@@ -179,7 +180,8 @@ def test_board_snapshot_and_html(tmp_path) -> None:
     assert "live-test gate" in page
     text = render_text(snap)
     assert "follow best priced" in text
-    assert "picked Uchijima" in text
+    assert "make Uchijima" in text
+    assert "take Hercog" in text
     assert "live-test gate" in text
 
 
@@ -432,3 +434,43 @@ def test_paper_record_scales_kelly_pnl() -> None:
     assert rec["kelly"]["losses"] == 0
     assert rec["kelly"]["skipped"] == 1
     assert rec["kelly"]["pnl_usdc"] == 25.0
+
+
+def test_taking_cincy_makers_is_named_as_sf_ml(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    odds = from_percent(62.5)  # 1.60 on the Reds
+    paper.write_text(
+        (
+            '{"ts": 1, "action": "join_maker", "market": "0xml", "side": "outcome_two",'
+            f' "label": "San Francisco Giants / Cincinnati Reds", "league": "MLB",'
+            f' "odds": "{odds}", "odds_pct": 62.5, "stake": "5000000", "stake_usdc": 5,'
+            ' "outcome_one": "San Francisco Giants", "outcome_two": "Cincinnati Reds",'
+            ' "style": "mm", "motive": "mm_quote", "imbalance": -0.3, "game_time": 10}\n'
+        ),
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        [
+            {
+                "marketHash": "0xml",
+                "outcomeOneName": "San Francisco Giants",
+                "outcomeTwoName": "Cincinnati Reds",
+                "leagueLabel": "MLB",
+            }
+        ]
+    )
+    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
+    open_row = snap["open"][0]
+    assert open_row["picked"] == "Cincinnati Reds"
+    assert open_row["decimal"] == 1.6
+    assert open_row["take_picked"] == "San Francisco Giants"
+    assert open_row["take_decimal"] == 2.67
+    assert open_row["verb"] == "make"
+    line = make_take_line(open_row)
+    assert "make Cincinnati Reds 1.6" in line
+    assert "take San Francisco Giants 2.67" in line
+    page = render_html(snap)
+    assert "take San Francisco Giants" in page
+    assert "make Cincinnati Reds" in page
+    text = render_text(snap)
+    assert "take San Francisco Giants 2.67" in text

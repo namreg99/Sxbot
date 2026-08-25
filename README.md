@@ -19,6 +19,12 @@ Every couple of seconds the bot looks at the live prices and asks:
 
 In **paper mode** (the default) it writes "I would have bet $5 on X at 49%" to a file. It does **not** send an order and it does **not** spend money. Real orders only happen if you later turn dry-run off and add keys.
 
+**Take vs make — they are opposite teams.** A maker posting **Cincinnati Reds 1.60** is betting the Reds. If you **take** that quote (fill it now), you are the other side: **San Francisco Giants moneyline** at about 2.67. Do not say "bet the Reds" when the question is a take.
+
+- **Make / limit** — rest with the heavy book. Makers on Cincy at 1.60 → make Reds around 1.61.
+- **Take those quotes** — click the Reds 1.60 offers → Giants ML.
+- The follow bot's `SX_FOLLOW_STYLE=take` is a different button: it pays the spread to *also* get the Reds (hits the Giants makers). When you ask "what should I take?", we mean fill the heavy Reds book and take San Francisco.
+
 **We cannot backtest last season.** SX does not keep old order books, so there is nothing to rewind. What we *can* do is leave paper mode running, then after SX *reports* the market run `sxbot grade`. A TV/scoreboard final is not the same as an SX `outcome` — totals often report first; moneylines and spreads can stay pending for hours. That scores those paper quotes *if they had been filled*. Joining as a maker often does not fill, so graded P&L is the optimistic case.
 
 ## How it works

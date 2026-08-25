@@ -79,6 +79,17 @@ def decimal_odds(prob: float) -> float:
     return 1.0 / prob
 
 
+def complement_decimal(decimal: float) -> float:
+    """Taker decimal if you fill a maker quote at `decimal`.
+
+    Makers on Cincinnati at 1.60 are betting the Reds. Taking that quote
+    is San Francisco at 1.60 / 0.60 = 2.67.
+    """
+    if decimal <= 1.0:
+        return 0.0
+    return decimal / (decimal - 1.0)
+
+
 class OddsLadder:
     """Snap prices onto the exchange ladder. Step size comes from GET /metadata/obv3."""
 

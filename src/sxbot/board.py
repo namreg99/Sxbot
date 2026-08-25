@@ -22,10 +22,10 @@ from sxbot.api import SxClient, index_markets, lookup_market
 from sxbot.config import Settings
 from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
-from sxbot.grade import grade_row
+from sxbot.grade import _picked_name, grade_row, opposite_side
 from sxbot.journal import load_all_paper
 from sxbot.kelly import shadow_kelly_from_row
-from sxbot.units import decimal_odds, to_percent, to_prob
+from sxbot.units import complement_decimal, decimal_odds, to_percent, to_prob
 from sxbot.wallets import CANDIDATE_WALLETS, KNOWN_WALLETS, labeled_addresses
 
 log = logging.getLogger("sxbot.board")
@@ -290,15 +290,30 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
     dec = decimal_odds(to_prob(odds)) if odds else 0.0
     decimal = round(dec, 2) if dec else None
     stake = float(row.get("stake_usdc") or bet.stake_usdc or 0)
+    take_dec = round(complement_decimal(dec), 2) if dec else None
+    take_picked = _picked_name(row, None, opposite_side(bet.side), bet.label)
+    action = bet.action
+    # join/mm rest on `picked`. Filling those quotes is a take of the other team.
+    if action in {"take_stale", "take_flow"}:
+        verb = "take"
+    elif action == "mm_fill":
+        verb = "fill"
+    elif action == "cancel":
+        verb = "cancel"
+    else:
+        verb = "make"
     view = {
         "ts": float(row.get("ts") or 0),
         "when": _utc(row.get("ts")),
         "style": str(row.get("style") or "") or "legacy",
-        "action": bet.action,
+        "action": action,
+        "verb": verb,
         "picked": bet.picked or bet.side,
+        "take_picked": take_picked or opposite_side(bet.side),
         "label": bet.label,
         "league": bet.league,
         "decimal": decimal,
+        "take_decimal": take_dec,
         "odds_pct": bet.odds_pct,
         "result": bet.result,
         "pnl_usdc": bet.pnl_usdc,
@@ -312,6 +327,23 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
         "best_priced": is_best_priced({"decimal": decimal}),
     }
     return _attach_books(view, row, settings)
+
+
+def make_take_line(b: dict[str, Any]) -> str:
+    """Makers on Cincy at 1.60 → make Reds 1.60 · take Giants 2.67."""
+    action = str(b.get("action") or "")
+    picked = str(b.get("picked") or "")
+    dec = b.get("decimal")
+    dec_s = f" {dec}" if dec is not None else ""
+    if action in {"take_stale", "take_flow"}:
+        return f"take {picked}{dec_s} (with makers)"
+    take_name = str(b.get("take_picked") or "")
+    take_dec = b.get("take_decimal")
+    take_s = f" {take_dec}" if take_dec is not None else ""
+    make_s = f"make {picked}{dec_s}"
+    if take_name:
+        return f"{make_s} · take {take_name}{take_s}"
+    return make_s
 
 
 def _record(views: list[dict[str, Any]]) -> dict[str, Any]:
@@ -574,22 +606,21 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 
     def paper_rows(rows: list[dict[str, Any]]) -> str:
         if not rows:
-            return "<tr><td colspan='8' class='empty'>No paper quotes yet. Leave `sxbot run` going.</td></tr>"
+            return "<tr><td colspan='7' class='empty'>No paper quotes yet. Leave `sxbot run` going.</td></tr>"
         bits: list[str] = []
         for b in rows:
             result = str(b.get("result") or "")
             bits.append(
                 "<tr class='{cls}'>"
-                "<td>{when}</td><td>{style}</td><td>{action}</td>"
-                "<td>{picked}</td><td class='num'>{dec}</td>"
+                "<td>{when}</td><td>{style}</td><td>{verb}</td>"
+                "<td>{side}</td>"
                 "<td>{league} {label}</td><td class='res'>{result}</td><td>{kick}</td>"
                 "</tr>".format(
                     cls=result,
                     when=html.escape(str(b.get("when") or "")),
                     style=html.escape(str(b.get("style") or "")),
-                    action=html.escape(str(b.get("action") or "")),
-                    picked=html.escape(str(b.get("picked") or "")),
-                    dec=b.get("decimal") if b.get("decimal") is not None else "",
+                    verb=html.escape(str(b.get("verb") or b.get("action") or "")),
+                    side=html.escape(make_take_line(b)),
                     league=html.escape(str(b.get("league") or "")),
                     label=html.escape(str(b.get("label") or "")[:40]),
                     result=html.escape(result),
@@ -602,7 +633,7 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
     best_open_s = "none open"
     if best_open:
         best_open_s = (
-            f"{best_open.get('picked')}  {best_open.get('decimal')}  "
+            f"{make_take_line(best_open)}  "
             f"{best_open.get('league')}  {best_open.get('label')}  "
             f"kickoff {best_open.get('kickoff')}"
         )
@@ -651,7 +682,7 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 <header>
   <h1>sxbot board</h1>
   <div class="meta">open <b>http://127.0.0.1:8765</b> on the <i>same machine</i> as <code>sxbot board</code> · auto-refresh {int(refresh)}s · {html.escape(str(snap.get("generated_at") or ""))} ·
-    names the side that was bet, not the first team in the label · paper assumes fills</div>
+    <b>make</b> = rest with the heavy book (you are on that team) · <b>take</b> = fill those quotes (you get the other team) · paper assumes fills</div>
 </header>
 <div class="kpis">
   <div class="kpi"><b>follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced"), books=True))}</div>
@@ -667,12 +698,12 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 {tape_note}
 <h2>Bot paper feed</h2>
 <table>
-  <thead><tr><th>when</th><th>style</th><th>action</th><th>picked</th><th>dec</th><th>market</th><th>result</th><th>kickoff</th></tr></thead>
+  <thead><tr><th>when</th><th>style</th><th>role</th><th>make / take</th><th>market</th><th>result</th><th>kickoff</th></tr></thead>
   <tbody>{paper_rows(snap.get("feed") or [])}</tbody>
 </table>
 <h2>Open paper (best price first)</h2>
 <table>
-  <thead><tr><th>when</th><th>style</th><th>action</th><th>picked</th><th>dec</th><th>market</th><th>result</th><th>kickoff</th></tr></thead>
+  <thead><tr><th>when</th><th>style</th><th>role</th><th>make / take</th><th>market</th><th>result</th><th>kickoff</th></tr></thead>
   <tbody>{paper_rows(snap.get("open") or [])}</tbody>
 </table>
 <h2>${int(snap.get("big_fill_usdc") or 5000):,}+ today UTC</h2>
@@ -736,7 +767,7 @@ def render_text(snap: dict[str, Any]) -> str:
     best = snap.get("best_open")
     if best:
         lines.append(
-            f"best priced open: picked {best.get('picked')} {best.get('decimal')}  "
+            f"best priced open: {make_take_line(best)}  "
             f"{best.get('label')}  {best.get('kickoff')}"
         )
     else:
@@ -751,8 +782,8 @@ def render_text(snap: dict[str, Any]) -> str:
     lines.append("paper feed")
     for b in (snap.get("feed") or [])[:12]:
         lines.append(
-            f"  {b.get('when')}  {b.get('style')} {b.get('action')}  "
-            f"picked {b.get('picked')} {b.get('decimal')}  {b.get('result')}  {b.get('label')}"
+            f"  {b.get('when')}  {b.get('style')} {b.get('verb') or b.get('action')}  "
+            f"{make_take_line(b)}  {b.get('result')}  {b.get('label')}"
         )
     return "\n".join(lines)
 

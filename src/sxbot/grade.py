@@ -71,6 +71,14 @@ def _waiting_note(game_time: int, *, now: int | None = None) -> str:
     return f"{when}  (started {elapsed // 3600}h ago; SX not reported yet)"
 
 
+def opposite_side(side: str) -> str:
+    if side == "outcome_one":
+        return "outcome_two"
+    if side == "outcome_two":
+        return "outcome_one"
+    return ""
+
+
 def _picked_name(
     row: dict[str, Any],
     market: dict[str, Any] | None,
