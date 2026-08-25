@@ -9,6 +9,7 @@ from typing import Any
 
 from sxbot.config import Settings
 from sxbot.journal import paper_log_for
+from sxbot.kelly import shadow_kelly_usdc
 from sxbot.models import Action, ExchangeMeta, Signal
 from sxbot.units import to_percent, to_usdc
 
@@ -77,6 +78,7 @@ class Executor:
         }
         if extra:
             record.update(extra)
+        self._stamp_books(record, signal)
         if self.settings.dry_run:
             log.info(
                 "PAPER %s %s %s @ %.3f%%  %s",
@@ -146,6 +148,17 @@ class Executor:
             "clientOrderId": client_order_id[:64],
             "_digest": digest,
         }
+
+    def _stamp_books(self, record: dict[str, Any], signal: Signal) -> None:
+        """Keep a $5 flat book and a ⅝-Kelly shadow on every paper row."""
+        record["flat_stake_usdc"] = float(self.settings.stake_usdc)
+        record["bankroll_usdc"] = float(self.settings.bankroll_usdc)
+        record["kelly_fraction"] = float(self.settings.kelly_fraction)
+        if signal.fair_odds:
+            record["fair_pct"] = to_percent(signal.fair_odds)
+        else:
+            record.setdefault("fair_pct", None)
+        record["kelly_stake_usdc"] = shadow_kelly_usdc(self.settings, signal)
 
     def _append(self, record: dict[str, Any], signal: Signal | None = None) -> None:
         path = self.paper_path

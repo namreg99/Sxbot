@@ -1,5 +1,6 @@
 from sxbot.models import Action, ExchangeMeta, Side, Signal
 from sxbot.executor import Executor
+from sxbot.units import from_percent
 from tests.conftest import make_market, make_settings
 
 
@@ -39,6 +40,42 @@ def test_dry_run_writes_paper_log(tmp_path) -> None:
     assert record["game_time"] == signal.market.game_time
     assert record["event_id"] == "L1"
     assert record["style"] == ""
+
+
+def test_dry_run_stamps_flat_and_kelly_books(tmp_path) -> None:
+    paper = tmp_path / "paper.jsonl"
+    executor = Executor(make_settings(paper_log=str(paper)), _meta(), client=None, paper_path=paper)
+    signal = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=from_percent(50.0),
+        reason="makers shifted",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(55.0),
+        style="mlb",
+    )
+    record = executor.execute(signal, 5_000_000)
+    assert record["flat_stake_usdc"] == 5.0
+    assert record["kelly_stake_usdc"] == 25.0
+    assert record["fair_pct"] == 55.0
+    assert record["stake_usdc"] == 5.0
+    skip = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=from_percent(50.0),
+        reason="no edge",
+        mid_move_bps=10,
+        imbalance=0.1,
+        confidence=0.5,
+        fair_odds=from_percent(50.0),
+    )
+    skipped = executor.execute(skip, 5_000_000)
+    assert skipped["kelly_stake_usdc"] is None
+    assert skipped["flat_stake_usdc"] == 5.0
 
 
 def _meta() -> ExchangeMeta:

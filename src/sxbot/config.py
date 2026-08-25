@@ -108,7 +108,8 @@ class Settings:
     mm_min_roi: float = 0.0
     mm_model_path: str = "sxbot-maker-model.json"
     mm_fit_prior_stake: float = 25_000.0
-    # Paper taker Kelly. 0.625 is between half-Kelly (moderate) and 3/4 (aggressive).
+    # Paper Kelly. 0.625 is between half-Kelly (moderate) and 3/4 (aggressive).
+    # Takes execute at Kelly. Joins/MM execute flat $5 and keep a Kelly shadow.
     bankroll_usdc: float = 1000.0
     kelly_fraction: float = 0.625
     kelly_max_frac: float = 0.05

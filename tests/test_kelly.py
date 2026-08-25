@@ -1,4 +1,10 @@
-from sxbot.kelly import full_kelly, sized_take_usdc, take_stake_usdc
+from sxbot.kelly import (
+    full_kelly,
+    shadow_kelly_from_row,
+    shadow_kelly_usdc,
+    sized_take_usdc,
+    take_stake_usdc,
+)
 from sxbot.models import Action, Side, Signal
 from sxbot.risk import RiskGate
 from sxbot.units import from_percent, to_base_units
@@ -77,6 +83,38 @@ def test_sized_take_uses_signal_fair_odds() -> None:
         fair_odds=from_percent(55.0),
     )
     assert sized_take_usdc(settings, join) is None
+    assert shadow_kelly_usdc(settings, join) == 25.0
+
+
+def test_shadow_kelly_skips_join_with_no_edge() -> None:
+    market = make_market()
+    join = Signal(
+        market=market,
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=from_percent(50.0),
+        reason="join",
+        mid_move_bps=40,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(50.0),
+    )
+    settings = make_settings(bankroll_usdc=1000, kelly_fraction=0.625)
+    assert shadow_kelly_usdc(settings, join) is None
+
+
+def test_shadow_kelly_from_row_uses_fair_pct_and_stamped_size() -> None:
+    settings = make_settings(bankroll_usdc=1000, kelly_fraction=0.625, max_per_market_usdc=25)
+    row = {
+        "action": "join_maker",
+        "odds": str(from_percent(50.0)),
+        "fair_pct": 55.0,
+    }
+    assert shadow_kelly_from_row(settings, row) == 25.0
+    row["kelly_stake_usdc"] = 12.5
+    assert shadow_kelly_from_row(settings, row) == 12.5
+    skip = {"action": "join_maker", "odds": str(from_percent(50.0))}
+    assert shadow_kelly_from_row(settings, skip) is None
 
 
 def test_risk_stake_for_skips_no_edge_take() -> None:

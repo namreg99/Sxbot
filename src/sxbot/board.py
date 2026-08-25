@@ -24,6 +24,7 @@ from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
 from sxbot.grade import grade_row
 from sxbot.journal import load_all_paper
+from sxbot.kelly import shadow_kelly_from_row
 from sxbot.units import decimal_odds, to_percent, to_prob
 from sxbot.wallets import CANDIDATE_WALLETS, KNOWN_WALLETS, labeled_addresses
 
@@ -33,6 +34,7 @@ _TRADE_ACTIONS = {"join_maker", "take_stale", "take_flow", "mm_fill"}
 BEST_PRICED_MAX_DECIMAL = 1.80
 MAKER_EV_MOTIVES = {"maker_steam", "size_rotation", "take_stale", "mm_quote"}
 DEFAULT_MIN_IMBALANCE = 0.15
+LIVE_TEST_TRADES = 100
 
 
 def _utc(ts: int | float | None) -> str:
@@ -243,12 +245,52 @@ def is_maker_ev(row: dict[str, Any], *, min_imbalance: float = DEFAULT_MIN_IMBAL
     return False
 
 
-def _paper_view(bet: Any, row: dict[str, Any]) -> dict[str, Any]:
+def scale_pnl(
+    pnl: float | None,
+    src_stake: float,
+    dest_stake: float | None,
+    result: str,
+) -> float | None:
+    """Replay P&L at another stake. Lose = −stake; win scales from graded P&L."""
+    if dest_stake is None or dest_stake <= 0:
+        return None
+    if result == "void":
+        return 0.0
+    if result not in {"win", "lose"}:
+        return None
+    if src_stake > 0 and pnl is not None:
+        return round(float(pnl) * (float(dest_stake) / src_stake), 2)
+    if result == "lose":
+        return round(-float(dest_stake), 2)
+    return None
+
+
+def _attach_books(view: dict[str, Any], row: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    result = str(view.get("result") or "")
+    actual_stake = float(view.get("stake_usdc") or 0)
+    actual_pnl = view.get("pnl_usdc")
+    flat = float(getattr(settings, "stake_usdc", 5) or 5)
+    stamped_flat = row.get("flat_stake_usdc")
+    if stamped_flat not in (None, ""):
+        try:
+            flat = float(stamped_flat)
+        except (TypeError, ValueError):
+            pass
+    view["flat_stake_usdc"] = flat
+    view["flat_pnl_usdc"] = scale_pnl(actual_pnl, actual_stake, flat, result)
+    kelly = shadow_kelly_from_row(settings, row)
+    view["kelly_stake_usdc"] = kelly
+    view["kelly_pnl_usdc"] = scale_pnl(actual_pnl, actual_stake, kelly, result)
+    view["fair_pct"] = row.get("fair_pct")
+    return view
+
+
+def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, Any]:
     odds = int(row.get("odds") or 0)
     dec = decimal_odds(to_prob(odds)) if odds else 0.0
     decimal = round(dec, 2) if dec else None
     stake = float(row.get("stake_usdc") or bet.stake_usdc or 0)
-    return {
+    view = {
         "ts": float(row.get("ts") or 0),
         "when": _utc(row.get("ts")),
         "style": str(row.get("style") or "") or "legacy",
@@ -269,6 +311,7 @@ def _paper_view(bet: Any, row: dict[str, Any]) -> dict[str, Any]:
         "with_makers": is_maker_ev(row),
         "best_priced": is_best_priced({"decimal": decimal}),
     }
+    return _attach_books(view, row, settings)
 
 
 def _record(views: list[dict[str, Any]]) -> dict[str, Any]:
@@ -287,6 +330,85 @@ def _record(views: list[dict[str, Any]]) -> dict[str, Any]:
         "stake_usdc": round(stake, 2),
         "pnl_usdc": round(pnl, 2),
         "roi_pct": round(100.0 * pnl / stake, 1) if stake else None,
+    }
+
+
+def _remap_record(
+    views: list[dict[str, Any]],
+    stake_key: str,
+    pnl_key: str,
+    *,
+    require_stake: bool = False,
+) -> dict[str, Any]:
+    remapped: list[dict[str, Any]] = []
+    skipped = 0
+    for view in views:
+        stake = view.get(stake_key)
+        if require_stake and not stake:
+            if view.get("result") in {"win", "lose"}:
+                skipped += 1
+            continue
+        item = dict(view)
+        if stake is not None:
+            item["stake_usdc"] = stake
+        if view.get(pnl_key) is not None:
+            item["pnl_usdc"] = view[pnl_key]
+        remapped.append(item)
+    rec = _record(remapped)
+    rec["skipped"] = skipped
+    return rec
+
+
+def paper_record(views: list[dict[str, Any]]) -> dict[str, Any]:
+    """Unique W–L on the executed paper stake, plus $5 flat and Kelly shadows."""
+    rec = _record(views)
+    rec["flat"] = _remap_record(views, "flat_stake_usdc", "flat_pnl_usdc")
+    rec["kelly"] = _remap_record(
+        views, "kelly_stake_usdc", "kelly_pnl_usdc", require_stake=True
+    )
+    return rec
+
+
+def _settled_n(rec: dict[str, Any] | None) -> int:
+    if not rec:
+        return 0
+    return int(rec.get("wins") or 0) + int(rec.get("losses") or 0)
+
+
+def live_test_status(
+    all_rec: dict[str, Any] | None,
+    *,
+    follow: dict[str, Any] | None = None,
+    mm: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Flag only. Never go live from this — 100 unique settled + both books green."""
+    rec = all_rec or {}
+    flat = rec.get("flat") or rec
+    kelly = rec.get("kelly") or {}
+    n = _settled_n(rec)
+    kelly_n = _settled_n(kelly)
+    flat_roi = flat.get("roi_pct")
+    kelly_roi = kelly.get("roi_pct")
+    ready = (
+        n >= LIVE_TEST_TRADES
+        and flat_roi is not None
+        and float(flat_roi) > 0
+        and kelly_n > 0
+        and kelly_roi is not None
+        and float(kelly_roi) > 0
+    )
+    return {
+        "target": LIVE_TEST_TRADES,
+        "settled": n,
+        "remaining": max(0, LIVE_TEST_TRADES - n),
+        "follow_settled": _settled_n(follow),
+        "mm_settled": _settled_n(mm),
+        "flat_roi_pct": flat_roi,
+        "kelly_roi_pct": kelly_roi,
+        "kelly_settled": kelly_n,
+        "kelly_skipped": int(kelly.get("skipped") or 0),
+        "ready": ready,
+        "note": "Paper only. Do not go live until this flag is ready and you explicitly say so.",
     }
 
 
@@ -330,7 +452,7 @@ def build_snapshot(
     yday_fills = [f for f in fills if y0 <= f["ts"] < t0]
 
     def _view_row(row: dict[str, Any]) -> dict[str, Any]:
-        return _paper_view(grade_row(row, lookup_market(markets, str(row.get("market") or ""))), row)
+        return _paper_view(grade_row(row, lookup_market(markets, str(row.get("market") or ""))), row, settings)
 
     life_bets = [_view_row(row) for row in unique_lifetime_rows(paper_rows)]
     open_bets = [
@@ -351,6 +473,9 @@ def build_snapshot(
     feed_src = feed_src[-40:]
     feed = [_view_row(row) for row in reversed(feed_src)]
 
+    follow_record = paper_record(follow_bets)
+    mm_bets = by_style.get(STYLE_MM) or []
+    record = paper_record(life_bets)
     return {
         "generated_at": _utc(now_ts),
         "generated_ts": now_ts,
@@ -361,32 +486,61 @@ def build_snapshot(
         "feed": feed,
         "open": open_bets,
         "best_open": best_open,
-        "record": _record(life_bets),
-        "follow_record": _record(follow_bets),
+        "record": record,
+        "follow_record": follow_record,
         "best_priced": {
-            **_record(best_priced),
+            **paper_record(best_priced),
             "max_decimal": BEST_PRICED_MAX_DECIMAL,
         },
-        "maker_ev": _record(maker_ev),
+        "maker_ev": paper_record(maker_ev),
         "priced_ev": {
-            **_record(priced_ev),
+            **paper_record(priced_ev),
             "max_decimal": BEST_PRICED_MAX_DECIMAL,
         },
-        "by_style": {k: _record(v) for k, v in sorted(by_style.items())},
+        "by_style": {k: paper_record(v) for k, v in sorted(by_style.items())},
         "today_record": _record(today_fills),
         "yesterday_record": _record(yday_fills),
+        "live_test": live_test_status(
+            record,
+            follow=follow_record,
+            mm=paper_record(mm_bets) if mm_bets else None,
+        ),
     }
 
 
 def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
-    def rec(r: dict[str, Any] | None) -> str:
+    def rec(r: dict[str, Any] | None, *, books: bool = False) -> str:
         if not r:
             return "—"
         wp = r.get("win_pct")
         wp_s = f"{wp:.0f}%" if wp is not None else "—"
         roi = r.get("roi_pct")
         roi_s = f"  ROI {roi:+.0f}%" if roi is not None else ""
-        return f"{r.get('wins', 0)}–{r.get('losses', 0)}  {wp_s}{roi_s}   pending {r.get('pending', 0)}"
+        pnl = r.get("pnl_usdc")
+        pnl_s = f"  PnL {pnl:+.2f}" if pnl is not None and _settled_n(r) else ""
+        line = f"{r.get('wins', 0)}–{r.get('losses', 0)}  {wp_s}{roi_s}{pnl_s}   pending {r.get('pending', 0)}"
+        kelly = r.get("kelly") if books else None
+        if kelly:
+            k_roi = kelly.get("roi_pct")
+            k_roi_s = f"  ROI {k_roi:+.0f}%" if k_roi is not None else ""
+            k_pnl = kelly.get("pnl_usdc")
+            k_pnl_s = f"  PnL {k_pnl:+.2f}" if k_pnl is not None and _settled_n(kelly) else ""
+            skip = int(kelly.get("skipped") or 0)
+            skip_s = f"  skip {skip}" if skip else ""
+            line += (
+                f" · Kelly {kelly.get('wins', 0)}–{kelly.get('losses', 0)}"
+                f"{k_roi_s}{k_pnl_s}{skip_s}"
+            )
+        return line
+
+    def gate_s(g: dict[str, Any] | None) -> str:
+        if not g:
+            return "—"
+        flag = "READY (still paper)" if g.get("ready") else "not ready"
+        return (
+            f"{g.get('settled', 0)}/{g.get('target', LIVE_TEST_TRADES)} unique settled  "
+            f"follow {g.get('follow_settled', 0)} · MM {g.get('mm_settled', 0)}  · {flag}"
+        )
 
     def fill_rows(rows: list[dict[str, Any]]) -> str:
         if not rows:
@@ -500,10 +654,12 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
     names the side that was bet, not the first team in the label · paper assumes fills</div>
 </header>
 <div class="kpis">
-  <div class="kpi"><b>follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced")))}</div>
-  <div class="kpi"><b>follow maker EV (steam / parked size)</b>{html.escape(rec(snap.get("maker_ev")))}</div>
-  <div class="kpi"><b>follow short + EV</b>{html.escape(rec(snap.get("priced_ev")))}</div>
-  <div class="kpi"><b>lifetime unique (kickoff cancel keeps the card)</b>{html.escape(rec(snap.get("record")))}</div>
+  <div class="kpi"><b>follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced"), books=True))}</div>
+  <div class="kpi"><b>follow maker EV (steam / parked size)</b>{html.escape(rec(snap.get("maker_ev"), books=True))}</div>
+  <div class="kpi"><b>follow short + EV</b>{html.escape(rec(snap.get("priced_ev"), books=True))}</div>
+  <div class="kpi"><b>follow unique $5 vs Kelly</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
+  <div class="kpi"><b>lifetime unique $5 vs Kelly</b>{html.escape(rec(snap.get("record"), books=True))}</div>
+  <div class="kpi"><b>live-test gate ({LIVE_TEST_TRADES} unique settled)</b>{html.escape(gate_s(snap.get("live_test")))}</div>
   <div class="kpi"><b>best priced open</b>{html.escape(best_open_s)}</div>
   <div class="kpi"><b>5k+ today / yesterday</b>{html.escape(rec(snap.get("today_record")))} / {html.escape(rec(snap.get("yesterday_record")))}</div>
   <div class="kpi"><b>by style</b>{style_bits}</div>
@@ -543,22 +699,39 @@ def render_text(snap: dict[str, Any]) -> str:
             f"picked {f.get('picked')} {f.get('decimal')}  {f.get('result')}{pnl_s}  {f.get('label')}"
         )
 
-    def rec(r: dict[str, Any] | None, title: str) -> str:
+    def rec(r: dict[str, Any] | None, title: str, *, books: bool = False) -> str:
         if not r:
             return f"{title}: —"
         wp = r.get("win_pct")
         wp_s = f"{wp:.0f}%" if wp is not None else "—"
         roi = r.get("roi_pct")
         roi_s = f" ROI {roi:+.0f}%" if roi is not None else ""
-        return f"{title}: {r.get('wins', 0)}–{r.get('losses', 0)} ({wp_s}{roi_s})"
+        line = f"{title}: {r.get('wins', 0)}–{r.get('losses', 0)} ({wp_s}{roi_s})"
+        kelly = r.get("kelly") if books else None
+        if kelly:
+            k_roi = kelly.get("roi_pct")
+            k_roi_s = f" ROI {k_roi:+.0f}%" if k_roi is not None else ""
+            skip = int(kelly.get("skipped") or 0)
+            skip_s = f" skip {skip}" if skip else ""
+            line += (
+                f"  Kelly {kelly.get('wins', 0)}–{kelly.get('losses', 0)}"
+                f" ({k_roi_s.strip()}{skip_s})"
+            )
+        return line
 
+    gate = snap.get("live_test") or {}
+    gate_flag = "READY (still paper)" if gate.get("ready") else "not ready"
     lines = [
         f"sxbot board  {snap.get('generated_at')}",
-        rec(snap.get("best_priced"), f"follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}"),
-        rec(snap.get("maker_ev"), "follow maker EV"),
-        rec(snap.get("priced_ev"), "follow short + EV"),
-        rec(snap.get("follow_record"), "follow unique"),
-        rec(snap.get("record"), "lifetime unique paper"),
+        rec(snap.get("best_priced"), f"follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}", books=True),
+        rec(snap.get("maker_ev"), "follow maker EV", books=True),
+        rec(snap.get("priced_ev"), "follow short + EV", books=True),
+        rec(snap.get("follow_record"), "follow unique $5 vs Kelly", books=True),
+        rec(snap.get("record"), "lifetime unique $5 vs Kelly", books=True),
+        (
+            f"live-test gate: {gate.get('settled', 0)}/{gate.get('target', LIVE_TEST_TRADES)} unique settled  "
+            f"follow {gate.get('follow_settled', 0)} · MM {gate.get('mm_settled', 0)}  · {gate_flag}"
+        ),
     ]
     best = snap.get("best_open")
     if best:

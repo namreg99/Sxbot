@@ -298,6 +298,9 @@ def _signal(
     reason: str,
     view: BookView,
 ) -> Signal:
+    fair = 0
+    if view.mid_one is not None:
+        fair = view.mid_one if side is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
     return Signal(
         market=market,
         side=side,
@@ -310,6 +313,7 @@ def _signal(
         crossed=view.crossed,
         motive="mm_quote" if action is Action.JOIN_MAKER else action.value,
         style=STYLE_MM,
+        fair_odds=fair,
     )
 
 

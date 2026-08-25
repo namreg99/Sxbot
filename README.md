@@ -126,7 +126,7 @@ See `.env.example`. The knobs that matter:
 | `SX_MIN_MID_MOVE_BPS` | How far the mid must move (100 bps = 1 implied-probability point) |
 | `SX_MIN_IMBALANCE` | Size skew that counts as makers parking money on one side |
 | `SX_JOIN_TICKS_BEHIND` | Rest behind the lead MM instead of penny-jumping them |
-| `SX_STAKE_USDC` | Size per join/take. Mainnet minimum is currently 5 USDC. Takes use Kelly vs this as the floor |
+| `SX_STAKE_USDC` | Flat size per join / MM fill (and Kelly floor). Mainnet minimum is currently 5 USDC |
 | `SX_BANKROLL_USDC` | Paper bankroll for Kelly takes (default 1000) |
 | `SX_KELLY_FRACTION` | Fractional Kelly on takes. 0.50 = moderate, 0.75 = aggressive, default **0.625** mid |
 | `SX_KELLY_MAX_FRAC` | Never bet more than this share of bankroll on one take (default 5%) |
@@ -185,9 +185,16 @@ Two-sided making (rest both outcomes, lock an overround if both fill, plus maker
 
 Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Pull at kickoff.
 
-## Paper taker Kelly
+## Paper books: $5 flat and ⅝ Kelly
 
-`sxbot run` with `SX_FOLLOW_STYLE=take` sizes each take with **⅝ Kelly** (between half-Kelly and ¾ Kelly) against a **$1000 paper bankroll**. Fair probability is the book's mid — SX's public API does not send the orange/global line. A take with no edge vs that mid is skipped, not rounded up to $5. Cap is `min(5% of bankroll, SX_MAX_PER_MARKET_USDC)`. Joins stay flat at `SX_STAKE_USDC`.
+Two unique books sit on the board for the same cards:
+
+- **$5 flat** — joins and MM ghost fills still *execute* at `SX_STAKE_USDC` (default 5). This is the comparable unique W–L / ROI.
+- **⅝ Kelly shadow** — every join / take / MM fill is also sized against a **$1000 paper bankroll** (between half-Kelly and ¾ Kelly). Fair probability is the book's mid — SX's public API does not send the orange/global line. No edge vs that mid → Kelly **skips** the card (not a loss). Cap is `min(5% of bankroll, SX_MAX_PER_MARKET_USDC)`.
+
+Takes (`SX_FOLLOW_STYLE=take`) still *execute* at Kelly. Joins stay flat. Do not go live from this shadow book.
+
+**Live-test gate:** after **100 unique settled** paper trades (follow + MM), the board flags `ready` only if **both** books are profitable. That flag is a tracker, not a deploy. Keep `SX_DRY_RUN=true` until you explicitly say to test live.
 
 A ~150k-fill sample (Dec/Jan + Jun + late July, including tennis) is what `sxbot profiles` is for. In that sample: **BotswanaMC** is the only labeled wallet with large **net** P&L, mostly pregame soccer and NFL at pick’em prices (1.80–2.20). **GambleGuruGary** prints millions of gross “Won” and is still **net negative** — the 1.13 hammer is a weapon, not the book. **Tennis lost money** for both takers. **cypherprod** is mixed maker/taker and the only one who is net-positive *live*. **HedgeHog** is the two-sided MM (`SX_MM_TWO_SIDED=true`). Default `sxbot mm` is one-sided extract, not that book. Do not clone all four as one bot.
 

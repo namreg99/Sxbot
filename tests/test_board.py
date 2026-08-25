@@ -1,9 +1,12 @@
 from sxbot.board import (
+    LIVE_TEST_TRADES,
     _fill_view,
     _record,
     _tape_windows,
     _windows,
     build_snapshot,
+    live_test_status,
+    paper_record,
     render_html,
     render_text,
     scrape_big_fills,
@@ -166,13 +169,18 @@ def test_board_snapshot_and_html(tmp_path) -> None:
     assert snap["record"]["losses"] == 0
     assert snap["best_priced"]["wins"] == 1
     assert snap["best_open"] is None
+    assert snap["live_test"]["target"] == LIVE_TEST_TRADES
+    assert snap["live_test"]["ready"] is False
+    assert snap["live_test"]["settled"] == 1
     page = render_html(snap)
     assert "sxbot board" in page
     assert "Uchijima" in page
     assert "Dodgers" not in page
+    assert "live-test gate" in page
     text = render_text(snap)
     assert "follow best priced" in text
     assert "picked Uchijima" in text
+    assert "live-test gate" in text
 
 
 def test_best_open_is_the_shortest_pending(tmp_path) -> None:
@@ -322,3 +330,105 @@ def test_lifetime_record_keeps_settled_after_cancel(tmp_path) -> None:
     assert snap["open"] == []
     assert snap["best_priced"]["wins"] == 1
     assert "lifetime unique" in render_text(snap)
+
+
+def test_dual_books_kelly_skip_is_not_a_loss(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    short = from_percent(50.0)
+    paper.write_text(
+        "\n".join(
+            [
+                '{"ts": 1, "action": "join_maker", "market": "0x1", "side": "outcome_one",'
+                f' "label": "A / B", "league": "EPL", "odds": "{short}", "odds_pct": 50.0,'
+                ' "stake": "5000000", "stake_usdc": 5, "outcome_one": "A", "outcome_two": "B",'
+                ' "style": "soccer", "motive": "maker_steam", "imbalance": 0.4,'
+                ' "fair_pct": 55.0, "flat_stake_usdc": 5, "game_time": 10}',
+                '{"ts": 2, "action": "join_maker", "market": "0x2", "side": "outcome_one",'
+                f' "label": "C / D", "league": "ATP", "odds": "{short}", "odds_pct": 50.0,'
+                ' "stake": "5000000", "stake_usdc": 5, "outcome_one": "C", "outcome_two": "D",'
+                ' "style": "tennis_dog", "motive": "tob_lag", "imbalance": -0.5, "game_time": 10}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        [
+            {"marketHash": "0x1", "outcomeOneName": "A", "outcomeTwoName": "B", "leagueLabel": "EPL", "outcome": 1, "gameTime": 10},
+            {"marketHash": "0x2", "outcomeOneName": "C", "outcomeTwoName": "D", "leagueLabel": "ATP", "outcome": 2, "gameTime": 10},
+        ]
+    )
+    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
+    rec = snap["record"]
+    assert rec["wins"] == 1
+    assert rec["losses"] == 1
+    assert rec["flat"]["wins"] == 1
+    assert rec["flat"]["losses"] == 1
+    assert rec["kelly"]["wins"] == 1
+    assert rec["kelly"]["losses"] == 0
+    assert rec["kelly"]["skipped"] == 1
+    assert rec["kelly"]["stake_usdc"] == 25.0
+    assert snap["live_test"]["settled"] == 2
+    assert snap["live_test"]["remaining"] == LIVE_TEST_TRADES - 2
+    assert snap["live_test"]["ready"] is False
+    page = render_html(snap)
+    assert "Kelly 1–0" in page
+    assert "skip 1" in page
+
+
+def test_live_test_ready_needs_100_and_both_books_green() -> None:
+    rec = {
+        "wins": 60,
+        "losses": 40,
+        "roi_pct": 5.0,
+        "flat": {"wins": 60, "losses": 40, "roi_pct": 5.0},
+        "kelly": {"wins": 50, "losses": 30, "roi_pct": 8.0, "skipped": 20},
+    }
+    gate = live_test_status(rec, follow={"wins": 20, "losses": 10}, mm={"wins": 40, "losses": 30})
+    assert gate["ready"] is True
+    assert gate["settled"] == 100
+    assert gate["follow_settled"] == 30
+    assert gate["mm_settled"] == 70
+    rec["flat"]["roi_pct"] = -1.0
+    assert live_test_status(rec)["ready"] is False
+    rec["flat"]["roi_pct"] = 5.0
+    rec["kelly"]["roi_pct"] = -2.0
+    assert live_test_status(rec)["ready"] is False
+    short = {
+        "wins": 17,
+        "losses": 8,
+        "roi_pct": 14.5,
+        "flat": {"roi_pct": 14.5},
+        "kelly": {"wins": 12, "losses": 5, "roi_pct": 8.0, "skipped": 8},
+    }
+    assert live_test_status(short)["ready"] is False
+    assert live_test_status(short)["remaining"] == LIVE_TEST_TRADES - 25
+
+
+def test_paper_record_scales_kelly_pnl() -> None:
+    views = [
+        {
+            "result": "win",
+            "stake_usdc": 5,
+            "pnl_usdc": 5,
+            "flat_stake_usdc": 5,
+            "flat_pnl_usdc": 5,
+            "kelly_stake_usdc": 25,
+            "kelly_pnl_usdc": 25,
+        },
+        {
+            "result": "lose",
+            "stake_usdc": 5,
+            "pnl_usdc": -5,
+            "flat_stake_usdc": 5,
+            "flat_pnl_usdc": -5,
+            "kelly_stake_usdc": None,
+            "kelly_pnl_usdc": None,
+        },
+    ]
+    rec = paper_record(views)
+    assert rec["flat"]["roi_pct"] == 0.0
+    assert rec["kelly"]["wins"] == 1
+    assert rec["kelly"]["losses"] == 0
+    assert rec["kelly"]["skipped"] == 1
+    assert rec["kelly"]["pnl_usdc"] == 25.0

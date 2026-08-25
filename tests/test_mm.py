@@ -1,10 +1,10 @@
 from sxbot.filters import STYLE_MM
 from sxbot.grade import format_grade, grade_paper, gradeable_rows
-from sxbot.mm import MMResting, quote_pair, quote_was_hit, taker_hits_maker
+from sxbot.mm import MMResting, _signal, quote_pair, quote_was_hit, taker_hits_maker
 from sxbot.models import Action, PublicTrade, Side, Signal
 from sxbot.orderbook import analyze
 from sxbot.risk import RiskGate
-from sxbot.units import OddsLadder, from_percent, to_base_units
+from sxbot.units import ODDS_SCALE, OddsLadder, from_percent, to_base_units
 from tests.conftest import make_book, make_market, make_settings
 
 
@@ -292,3 +292,12 @@ def test_soccer_two_way_is_quoteable() -> None:
     assert ghost.odds_one == from_percent(31.875)
     assert ghost.odds_two is None
     assert "soccer" in ghost.reason
+
+
+def test_mm_signal_sets_fair_from_mid() -> None:
+    view = analyze(make_book(o1=((55.0, 100),), o2=((48.0, 80),)))
+    market = _mlb()
+    one = _signal(market, Side.OUTCOME_ONE, Action.MM_FILL, view.best_one, "tape", view)
+    assert one.fair_odds == view.mid_one
+    two = _signal(market, Side.OUTCOME_TWO, Action.MM_FILL, view.best_two, "tape", view)
+    assert two.fair_odds == ODDS_SCALE - view.mid_one
