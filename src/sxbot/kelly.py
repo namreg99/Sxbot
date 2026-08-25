@@ -7,8 +7,9 @@ Fair probability is the book's mid — the same number the orange/global line
 is trying to represent. SX's public orderbook snapshot does not include that
 orange line, so mid is the proxy until the UI field is on the API.
 
-Joins and MM still *execute* at the flat `SX_STAKE_USDC` ($5). Kelly is the
-comparable shadow book on the board. Takes still size live with Kelly.
+Joins, MM, and Botswana-style steam takes (`TAKE_FLOW`) still *execute* at
+the flat `SX_STAKE_USDC` ($5). Kelly is the comparable shadow book on the
+board. Leftover crossed quotes (`TAKE_STALE`) still size live with Kelly.
 A no-edge shadow does not count as a Kelly loss.
 """
 
@@ -82,7 +83,10 @@ def kelly_stake_usdc(settings: object, *, p: float, decimal: float) -> float | N
 
 
 def sized_take_usdc(settings: object, signal: Signal) -> float | None:
-    """Kelly size for a stale take, or None to skip. Fill-the-quotes takes stay $5."""
+    """Kelly size for a stale leftover take, or None to skip.
+
+    Steam takes (`TAKE_FLOW`) stay the flat $5 — same team as the makers.
+    """
     if signal.action not in KELLY_ACTIONS:
         return None
     if not bool(getattr(settings, "kelly_on_takes", True)):

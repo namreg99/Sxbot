@@ -129,10 +129,11 @@ def take_of_make(
     stake_usdc: float,
     decimals: int = 6,
 ) -> tuple[str, float | None]:
-    """$5 take of a maker quote: other team, complementary odds.
+    """Mirror of a maker quote: the other team at complementary odds.
 
-    Makers on Cincinnati at 1.64 (61%) — taking that quote is San Francisco
-    at 2.56. If the make won, the take lost, and the other way around.
+    If we make San Francisco at 2.45, someone betting Cincinnati at ~1.69
+    is what fills us. That is fill mechanics for the maker bot — not the
+    follow-bot's book. The taker bot rides the *same* side as the makers.
     """
     if make_result == "pending":
         return "pending", None

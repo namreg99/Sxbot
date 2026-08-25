@@ -19,15 +19,12 @@ Every couple of seconds the bot looks at the live prices and asks:
 
 In **paper mode** (the default) it writes "I would have bet $5 on X at 49%" to a file. It does **not** send an order and it does **not** spend money. Real orders only happen if you later turn dry-run off and add keys.
 
-**MAKE vs TAKE — opposite teams, different odds, different $5 P&L.**
+**Two bots, two books. Do not mix them.**
 
-Makers posting **Cincinnati Reds 1.64** are betting the Reds. A $5 **make** on that quote wins **+$3.20** if Cincy wins and loses **−$5** if they don't.
+- **Taker bot** (`sxbot run`) uses maker bias to bet the *same* team the makers are leaning — Botswana-style. Default `SX_FOLLOW_STYLE=join` sits one tick behind them as a maker order. `SX_FOLLOW_STYLE=take` hits the leftover book to *get* that same team (you pay the spread). Either way the card is **TAKE/JOIN $5 {that team}**. It is not fading the heavy quotes.
+- **Maker bot** (`sxbot mm`) stays a maker and is scored at **maker odds** on the quoted side. If we make **San Francisco at 2.45**, someone had to bet **Cincinnati at ~1.69** to fill us. That mirror bet is how the fill happens — it is not the taker bot's P&L.
 
-**Taking** that quote is not the Reds. You fill their order, so you are on **San Francisco Giants at 2.56**. A $5 take wins **+$7.80** if the Giants win and loses **−$5** if they don't. Wins and losses are the opposite of the make, and the payout is larger because 2.56 is a dog.
-
-- **MAKE $5** — rest with the heavy book. Cincy @ 1.64.
-- **TAKE $5** — fill those Cincy quotes. Giants ML @ 2.56. This is what the trading bot does on `SX_FOLLOW_STYLE=take`.
-- Stale leftover (`take_stale`) is the exception: you pick up junk through the new mid and stay on the same team as the steam.
+Example: makers lean Cincinnati at 1.64. The taker bot wants Cincinnati (with the steam). The maker bot quoting San Francisco at 2.45 fills when a stranger bets Cincinnati at 1.6. Those are different processes and different unique cards.
 
 **We cannot backtest last season.** SX does not keep old order books, so there is nothing to rewind. What we *can* do is leave paper mode running, then after SX *reports* the market run `sxbot grade`. A TV/scoreboard final is not the same as an SX `outcome` — totals often report first; moneylines and spreads can stay pending for hours. That scores those paper quotes *if they had been filled*. Joining as a maker often does not fill, so graded P&L is the optimistic case.
 
@@ -56,9 +53,9 @@ The bot defaults to **mainnet**. It sums V2 resting orders by price/side into th
 
 Only while `sxbot run` is actually running. There is no background daemon. Dry-run is the default (`SX_DRY_RUN=true`): intended orders go to `sxbot-paper-{mlb,soccer,tennis_short,tennis_dog}.jsonl` and nothing is signed. `sxbot mm` writes `sxbot-paper-mm.jsonl`. The old mixed `sxbot-paper.jsonl` dump is not loaded once those style files exist — erase it if it is still around. Flow events go to `sxbot-flow.jsonl`. `sxbot summary` prints both.
 
-The board **lifetime unique** card is the last join/take/fill per market+side+style (`sxbot run` and `sxbot mm` do not overwrite each other). A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side. Do not mix those two piles.
+The board keeps **taker unique** (`sxbot run`) and **maker unique** (`sxbot mm`) on separate cards. Combined unique is the live-test gate only — do not read it as one bot's ROI. A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side.
 
-Follow paper is split on the board into **best priced** (decimal ≤1.80), **maker EV** (steam / size parked on our side), and the overlap. Each card shows W–L, win%, and ROI on settled unique quotes (assumes fills). MM stays in `by style`.
+Follow paper is split on the board into **best priced** (decimal ≤1.80), **maker EV** (steam / size parked on our side), and the overlap. Each card shows W–L, win%, and ROI on settled unique quotes (assumes fills). MM has its own unique card.
 
 Live orders additionally need `SX_API_KEY`, `SX_PRIVATE_KEY`, `pip install -e ".[trade]"`, a funded proxy, and `SX_DRY_RUN=false`. Keep paper mode on until that log looks like a strategy you actually want to fund.
 
@@ -141,7 +138,7 @@ See `.env.example`. The knobs that matter:
 | `SX_KELLY_FRACTION` | Fractional Kelly on takes. 0.50 = moderate, 0.75 = aggressive, default **0.625** mid |
 | `SX_KELLY_MAX_FRAC` | Never bet more than this share of bankroll on one take (default 5%) |
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
-| `SX_FOLLOW_STYLE` | `join` (sit behind makers), `take` (hit now), `mixed` (take strong steam, else join) |
+| `SX_FOLLOW_STYLE` | `join` (sit behind makers, same team), `take` (hit now, same team as steam), `mixed` |
 | `SX_MM_TWO_SIDED` | `false` (default): ghost-quote the heavy side only. `true`: rest both sides for a spread |
 | `SX_MM_MIN_ROI` | Skip a ghost quote if the fitted cell shrinks below this (default 0) |
 | `SX_MM_MODEL_PATH` | Fill-ROI table from `sxbot fit` (default `sxbot-maker-model.json`) |
@@ -162,7 +159,7 @@ See `.env.example`. The knobs that matter:
 | Size disappears at the best **and** the tape printed | A taker lifted offers | Ignore — do not copy takers |
 | Leftover quotes sitting through the new mid (crossed book) | Stale size after a steam | Take it — that *is* betting with the makers |
 
-`sxbot flow` prints that classification live. `sxbot run` papers maker-driven motives. `SX_FOLLOW_STYLE=take` fills the heavy maker quotes (you get the other team at the complement, $5); `mixed` does that only on strong steam/rotation.
+`sxbot flow` prints that classification live. `sxbot run` is the taker/follow bot: it papers maker-driven motives *with* the steam. `SX_FOLLOW_STYLE=take` hits the leftover book to get the same team as the makers (Botswana, $5); `mixed` does that only on strong steam/rotation; default `join` sits one tick behind. `sxbot mm` is a separate maker bot scored at maker odds.
 
 ## Fingerprinting wallets before V3
 
@@ -202,7 +199,7 @@ Two unique books sit on the board for the same cards:
 - **$5 flat** — joins and MM ghost fills still *execute* at `SX_STAKE_USDC` (default 5). This is the comparable unique W–L / ROI.
 - **⅝ Kelly shadow** — every join / take / MM fill is also sized against a **$1000 paper bankroll** (between half-Kelly and ¾ Kelly). Fair probability is the book's mid — SX's public API does not send the orange/global line. No edge vs that mid → Kelly **skips** the card (not a loss). Cap is `min(5% of bankroll, SX_MAX_PER_MARKET_USDC)`.
 
-Takes (`SX_FOLLOW_STYLE=take`) fill the heavy book at a flat $5. Stale leftover takes still use Kelly. Joins stay flat. Do not go live from this shadow book.
+Botswana-style steam takes (`SX_FOLLOW_STYLE=take`) execute at a flat $5 on the *same* team as the makers. Stale leftover takes still use Kelly. Joins and MM stay flat. Do not go live from this shadow book. Do not score the taker bot as the complement of a maker quote.
 
 **Live-test gate:** after **100 unique settled** paper trades (follow + MM), the board flags `ready` only if **both** books are profitable. That flag is a tracker, not a deploy. Keep `SX_DRY_RUN=true` until you explicitly say to test live.
 

@@ -22,7 +22,7 @@ from sxbot.api import SxClient, index_markets, lookup_market
 from sxbot.config import Settings
 from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
-from sxbot.grade import _picked_name, grade_row, opposite_side, take_of_make
+from sxbot.grade import _picked_name, grade_row, opposite_side
 from sxbot.journal import load_all_paper
 from sxbot.kelly import shadow_kelly_from_row
 from sxbot.units import complement_decimal, decimal_odds, to_percent, to_prob
@@ -290,7 +290,6 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
     dec = decimal_odds(to_prob(odds)) if odds else 0.0
     decimal = round(dec, 2) if dec else None
     stake = float(row.get("stake_usdc") or bet.stake_usdc or 0)
-    take_stake = float(getattr(settings, "stake_usdc", 5) or 5)
     opp = opposite_side(bet.side)
     other_name = _picked_name(row, None, opp, bet.label) or opp
     other_dec = round(complement_decimal(dec), 2) if dec else None
@@ -303,45 +302,24 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
         verb = "cancel"
     else:
         verb = "make"
-    # TAKE_FLOW fills the heavy quotes → logged side is already the take.
-    # JOIN/MM rest on the heavy quotes → take is the other team at complement odds.
-    if action == "take_flow":
-        make_on = other_name
-        make_decimal = other_dec
-        take_on = bet.picked or bet.side
-        take_decimal = decimal
-        take_result, take_pnl = bet.result, bet.pnl_usdc
-    elif action in {"join_maker", "mm_fill", "cancel"} or verb == "make":
-        make_on = bet.picked or bet.side
-        make_decimal = decimal
-        take_on = other_name
-        take_decimal = other_dec
-        take_result, take_pnl = take_of_make(
-            make_odds=odds,
-            make_result=str(bet.result or ""),
-            stake_usdc=take_stake,
-        )
-    else:
-        make_on = bet.picked or bet.side
-        make_decimal = decimal
-        take_on = other_name
-        take_decimal = other_dec
-        take_result, take_pnl = None, None
+    picked = bet.picked or bet.side
+    # Taker bot: same team as the makers, at taker (or join) odds.
+    # Maker bot: quoted team at maker odds. Fill mechanic = someone bet the
+    # other side at the complement (SF @ 2.45 fills when someone bets Cincy @ 1.69).
     view = {
         "ts": float(row.get("ts") or 0),
         "when": _utc(row.get("ts")),
         "style": str(row.get("style") or "") or "legacy",
         "action": action,
         "verb": verb,
-        "picked": bet.picked or bet.side,
-        "make_on": make_on,
-        "make_decimal": make_decimal,
-        "take_picked": take_on,
-        "take_on": take_on,
-        "take_decimal": take_decimal,
-        "take_result": take_result,
-        "take_pnl_usdc": None if take_pnl is None else round(float(take_pnl), 2),
-        "take_stake_usdc": take_stake,
+        "picked": picked,
+        "make_on": picked,
+        "make_decimal": decimal,
+        "take_picked": picked if verb == "take" else other_name,
+        "take_on": picked if verb == "take" else other_name,
+        "take_decimal": decimal if verb == "take" else other_dec,
+        "fill_when": other_name,
+        "fill_when_decimal": other_dec,
         "label": bet.label,
         "league": bet.league,
         "decimal": decimal,
@@ -367,31 +345,32 @@ def _win_lose_dollars(decimal: float | None, stake: float) -> str:
 
 
 def make_take_line(b: dict[str, Any]) -> str:
-    """MAKE = same team as the resting quotes. TAKE = fill them (other team)."""
-    stake = float(b.get("take_stake_usdc") or b.get("flat_stake_usdc") or b.get("stake_usdc") or 5)
+    """Taker = same team as makers. Maker = quoted team; fill = the mirror bet."""
+    stake = float(b.get("flat_stake_usdc") or b.get("stake_usdc") or 5)
     action = str(b.get("action") or "")
-    make_on = str(b.get("make_on") or b.get("picked") or "")
-    make_dec = b.get("make_decimal") if b.get("make_decimal") is not None else b.get("decimal")
-    take_on = str(b.get("take_on") or b.get("take_picked") or "")
-    take_dec = b.get("take_decimal")
+    picked = str(b.get("picked") or b.get("make_on") or "")
+    decimal = b.get("decimal") if b.get("decimal") is not None else b.get("make_decimal")
+    fill_when = str(b.get("fill_when") or "")
+    fill_dec = b.get("fill_when_decimal")
     if action == "take_flow":
         return (
-            f"TAKE ${stake:g} {take_on} @{take_dec}"
-            f"{_win_lose_dollars(take_dec, stake)}"
-            f"  (makers were on {make_on} @{make_dec})"
+            f"TAKE ${stake:g} {picked} @{decimal}"
+            f"{_win_lose_dollars(decimal, stake)}"
+            f"  (same side as makers — pay the spread)"
         )
     if action == "take_stale":
-        picked = str(b.get("picked") or "")
         return (
-            f"TAKE ${stake:g} {picked} @{b.get('decimal')}"
-            f"{_win_lose_dollars(b.get('decimal'), stake)}"
+            f"TAKE ${stake:g} {picked} @{decimal}"
+            f"{_win_lose_dollars(decimal, stake)}"
             f"  (stale leftover — same team as the steam)"
         )
+    fill_note = ""
+    if fill_when and fill_dec:
+        fill_note = f"  (fills when someone bets {fill_when} @{fill_dec})"
     return (
-        f"MAKE ${stake:g} {make_on} @{make_dec}"
-        f"{_win_lose_dollars(make_dec, stake)}"
-        f"  ·  TAKE ${stake:g} {take_on} @{take_dec}"
-        f"{_win_lose_dollars(take_dec, stake)}"
+        f"MAKE ${stake:g} {picked} @{decimal}"
+        f"{_win_lose_dollars(decimal, stake)}"
+        f"{fill_note}"
     )
 
 
@@ -441,22 +420,16 @@ def _remap_record(
 
 
 def paper_record(views: list[dict[str, Any]]) -> dict[str, Any]:
-    """Unique W–L on the executed paper stake, plus $5 flat and Kelly shadows."""
+    """Unique W–L on the executed paper stake, plus $5 flat and Kelly shadows.
+
+    Follow unique and MM unique are separate bots. Do not flip a make into
+    a take book — that is not the taker bot's P&L.
+    """
     rec = _record(views)
     rec["flat"] = _remap_record(views, "flat_stake_usdc", "flat_pnl_usdc")
     rec["kelly"] = _remap_record(
         views, "kelly_stake_usdc", "kelly_pnl_usdc", require_stake=True
     )
-    take_views: list[dict[str, Any]] = []
-    for view in views:
-        if view.get("take_result") not in {"win", "lose", "pending"}:
-            continue
-        item = dict(view)
-        item["result"] = view["take_result"]
-        item["stake_usdc"] = float(view.get("take_stake_usdc") or 5)
-        item["pnl_usdc"] = view.get("take_pnl_usdc")
-        take_views.append(item)
-    rec["take"] = _record(take_views)
     return rec
 
 
@@ -566,6 +539,7 @@ def build_snapshot(
 
     follow_record = paper_record(follow_bets)
     mm_bets = by_style.get(STYLE_MM) or []
+    mm_record = paper_record(mm_bets)
     record = paper_record(life_bets)
     return {
         "generated_at": _utc(now_ts),
@@ -579,6 +553,7 @@ def build_snapshot(
         "best_open": best_open,
         "record": record,
         "follow_record": follow_record,
+        "mm_record": mm_record,
         "best_priced": {
             **paper_record(best_priced),
             "max_decimal": BEST_PRICED_MAX_DECIMAL,
@@ -594,7 +569,7 @@ def build_snapshot(
         "live_test": live_test_status(
             record,
             follow=follow_record,
-            mm=paper_record(mm_bets) if mm_bets else None,
+            mm=mm_record if mm_bets else None,
         ),
     }
 
@@ -621,16 +596,6 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
             line += (
                 f" · Kelly {kelly.get('wins', 0)}–{kelly.get('losses', 0)}"
                 f"{k_roi_s}{k_pnl_s}{skip_s}"
-            )
-        take = r.get("take") if books else None
-        if take and _settled_n(take):
-            t_roi = take.get("roi_pct")
-            t_roi_s = f"  ROI {t_roi:+.0f}%" if t_roi is not None else ""
-            t_pnl = take.get("pnl_usdc")
-            t_pnl_s = f"  PnL {t_pnl:+.2f}" if t_pnl is not None else ""
-            line += (
-                f" · TAKE $5 {take.get('wins', 0)}–{take.get('losses', 0)}"
-                f"{t_roi_s}{t_pnl_s}"
             )
         return line
 
@@ -751,14 +716,15 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 <header>
   <h1>sxbot board</h1>
   <div class="meta">open <b>http://127.0.0.1:8765</b> on the <i>same machine</i> as <code>sxbot board</code> · auto-refresh {int(refresh)}s · {html.escape(str(snap.get("generated_at") or ""))} ·
-    <b>MAKE $5</b> = same team as the resting quotes, at that price · <b>TAKE $5</b> = fill those quotes (other team at the complement — Cincy 1.64 make → SF 2.56 take) · paper assumes fills</div>
+    two bots · <b>taker</b> (<code>sxbot run</code>) rides maker bias on the <i>same</i> team · <b>maker</b> (<code>sxbot mm</code>) stays maker at maker odds (SF @ 2.45 fills when someone bets Cincy @ 1.69) · paper assumes fills</div>
 </header>
 <div class="kpis">
   <div class="kpi"><b>follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced"), books=True))}</div>
   <div class="kpi"><b>follow maker EV (steam / parked size)</b>{html.escape(rec(snap.get("maker_ev"), books=True))}</div>
   <div class="kpi"><b>follow short + EV</b>{html.escape(rec(snap.get("priced_ev"), books=True))}</div>
-  <div class="kpi"><b>follow unique $5 vs Kelly</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
-  <div class="kpi"><b>lifetime unique $5 vs Kelly</b>{html.escape(rec(snap.get("record"), books=True))}</div>
+  <div class="kpi"><b>taker bot unique (`sxbot run`)</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
+  <div class="kpi"><b>maker bot unique (`sxbot mm`)</b>{html.escape(rec(snap.get("mm_record"), books=True))}</div>
+  <div class="kpi"><b>combined unique (gate only — do not mix ROI)</b>{html.escape(rec(snap.get("record"), books=True))}</div>
   <div class="kpi"><b>live-test gate ({LIVE_TEST_TRADES} unique settled)</b>{html.escape(gate_s(snap.get("live_test")))}</div>
   <div class="kpi"><b>best priced open</b>{html.escape(best_open_s)}</div>
   <div class="kpi"><b>5k+ today / yesterday</b>{html.escape(rec(snap.get("today_record")))} / {html.escape(rec(snap.get("yesterday_record")))}</div>
@@ -817,14 +783,6 @@ def render_text(snap: dict[str, Any]) -> str:
                 f"  Kelly {kelly.get('wins', 0)}–{kelly.get('losses', 0)}"
                 f" ({k_roi_s.strip()}{skip_s})"
             )
-        take = r.get("take") if books else None
-        if take and _settled_n(take):
-            t_roi = take.get("roi_pct")
-            t_roi_s = f" ROI {t_roi:+.0f}%" if t_roi is not None else ""
-            line += (
-                f"  TAKE $5 {take.get('wins', 0)}–{take.get('losses', 0)}"
-                f" ({t_roi_s.strip()})"
-            )
         return line
 
     gate = snap.get("live_test") or {}
@@ -834,8 +792,9 @@ def render_text(snap: dict[str, Any]) -> str:
         rec(snap.get("best_priced"), f"follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}", books=True),
         rec(snap.get("maker_ev"), "follow maker EV", books=True),
         rec(snap.get("priced_ev"), "follow short + EV", books=True),
-        rec(snap.get("follow_record"), "follow unique $5 vs Kelly", books=True),
-        rec(snap.get("record"), "lifetime unique $5 vs Kelly", books=True),
+        rec(snap.get("follow_record"), "taker bot unique (sxbot run)", books=True),
+        rec(snap.get("mm_record"), "maker bot unique (sxbot mm)", books=True),
+        rec(snap.get("record"), "combined unique (gate only)", books=True),
         (
             f"live-test gate: {gate.get('settled', 0)}/{gate.get('target', LIVE_TEST_TRADES)} unique settled  "
             f"follow {gate.get('follow_settled', 0)} · MM {gate.get('mm_settled', 0)}  · {gate_flag}"

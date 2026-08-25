@@ -181,7 +181,10 @@ def test_board_snapshot_and_html(tmp_path) -> None:
     text = render_text(snap)
     assert "follow best priced" in text
     assert "MAKE $5 Uchijima" in text
-    assert "TAKE $5 Hercog" in text
+    assert "fills when someone bets Hercog" in text
+    assert "TAKE $5 Hercog" not in text
+    assert "taker bot unique" in text
+    assert "maker bot unique" in text
     assert "live-test gate" in text
 
 
@@ -331,7 +334,8 @@ def test_lifetime_record_keeps_settled_after_cancel(tmp_path) -> None:
     assert snap["record"]["losses"] == 0
     assert snap["open"] == []
     assert snap["best_priced"]["wins"] == 1
-    assert "lifetime unique" in render_text(snap)
+    assert "combined unique" in render_text(snap)
+    assert "taker bot unique" in render_text(snap)
 
 
 def test_dual_books_kelly_skip_is_not_a_loss(tmp_path) -> None:
@@ -436,16 +440,92 @@ def test_paper_record_scales_kelly_pnl() -> None:
     assert rec["kelly"]["pnl_usdc"] == 25.0
 
 
-def test_taking_cincy_makers_is_named_as_sf_ml(tmp_path) -> None:
+def test_maker_quote_names_the_quoted_side_and_the_mirror_fill(tmp_path) -> None:
     paper = tmp_path / "sxbot-paper.jsonl"
-    odds = from_percent(62.5)  # 1.60 on the Reds
+    odds = from_percent(40.816)  # SF @ ~2.45 as maker
+    paper.write_text(
+        (
+            '{"ts": 1, "action": "join_maker", "market": "0xml", "side": "outcome_one",'
+            f' "label": "San Francisco Giants / Cincinnati Reds", "league": "MLB",'
+            f' "odds": "{odds}", "odds_pct": 40.816, "stake": "5000000", "stake_usdc": 5,'
+            ' "outcome_one": "San Francisco Giants", "outcome_two": "Cincinnati Reds",'
+            ' "style": "mm", "motive": "mm_quote", "imbalance": 0.3, "game_time": 10}\n'
+        ),
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        [
+            {
+                "marketHash": "0xml",
+                "outcomeOneName": "San Francisco Giants",
+                "outcomeTwoName": "Cincinnati Reds",
+                "leagueLabel": "MLB",
+            }
+        ]
+    )
+    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
+    open_row = snap["open"][0]
+    assert open_row["picked"] == "San Francisco Giants"
+    assert open_row["verb"] == "make"
+    assert open_row["fill_when"] == "Cincinnati Reds"
+    line = make_take_line(open_row)
+    assert "MAKE $5 San Francisco Giants" in line
+    assert "fills when someone bets Cincinnati Reds" in line
+    assert "TAKE $5 Cincinnati Reds" not in line
+    page = render_html(snap)
+    assert "MAKE $5 San Francisco Giants" in page
+    assert "fills when someone bets Cincinnati Reds" in page
+    text = render_text(snap)
+    assert "maker bot unique" in text
+    assert "TAKE $5 Cincinnati Reds" not in text
+
+
+def test_maker_unique_scores_at_maker_odds_not_the_mirror(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    odds = from_percent(62.5)
     paper.write_text(
         (
             '{"ts": 1, "action": "join_maker", "market": "0xml", "side": "outcome_two",'
             f' "label": "San Francisco Giants / Cincinnati Reds", "league": "MLB",'
             f' "odds": "{odds}", "odds_pct": 62.5, "stake": "5000000", "stake_usdc": 5,'
             ' "outcome_one": "San Francisco Giants", "outcome_two": "Cincinnati Reds",'
-            ' "style": "mm", "motive": "mm_quote", "imbalance": -0.3, "game_time": 10}\n'
+            ' "style": "mm", "motive": "mm_quote", "game_time": 10}\n'
+        ),
+        encoding="utf-8",
+    )
+    # Giants win → maker Cincy lost $5. That is the maker bot's book.
+    # The taker bot is a different process and is not this flipped complement.
+    client = FakeClient(
+        [
+            {
+                "marketHash": "0xml",
+                "outcomeOneName": "San Francisco Giants",
+                "outcomeTwoName": "Cincinnati Reds",
+                "leagueLabel": "MLB",
+                "outcome": 1,
+                "gameTime": 10,
+            }
+        ]
+    )
+    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
+    rec = snap["mm_record"]
+    assert rec["wins"] == 0
+    assert rec["losses"] == 1
+    assert rec["pnl_usdc"] == -5.0
+    assert "take" not in rec
+    assert snap["follow_record"]["n"] == 0
+
+
+def test_take_flow_is_the_same_team_as_makers(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    odds = from_percent(54.0)  # pay the spread to get Cincy with the steam
+    paper.write_text(
+        (
+            '{"ts": 1, "action": "take_flow", "market": "0xml", "side": "outcome_two",'
+            f' "label": "San Francisco Giants / Cincinnati Reds", "league": "MLB",'
+            f' "odds": "{odds}", "odds_pct": 54.0, "stake": "5000000", "stake_usdc": 5,'
+            ' "outcome_one": "San Francisco Giants", "outcome_two": "Cincinnati Reds",'
+            ' "style": "mlb", "motive": "maker_steam", "game_time": 10}\n'
         ),
         encoding="utf-8",
     )
@@ -462,56 +542,8 @@ def test_taking_cincy_makers_is_named_as_sf_ml(tmp_path) -> None:
     snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
     open_row = snap["open"][0]
     assert open_row["picked"] == "Cincinnati Reds"
-    assert open_row["decimal"] == 1.6
-    assert open_row["take_picked"] == "San Francisco Giants"
-    assert open_row["take_decimal"] == 2.67
-    assert open_row["verb"] == "make"
+    assert open_row["verb"] == "take"
     line = make_take_line(open_row)
-    assert "MAKE $5 Cincinnati Reds @1.6" in line
-    assert "TAKE $5 San Francisco Giants @2.67" in line
-    assert "win +$3.00" in line
-    assert "win +$8.35" in line
-    page = render_html(snap)
-    assert "TAKE $5 San Francisco Giants @2.67" in page
-    assert "MAKE $5 Cincinnati Reds @1.6" in page
-    text = render_text(snap)
-    assert "TAKE $5 San Francisco Giants @2.67" in text
-
-
-def test_take_roi_uses_complement_odds_and_flips_the_result(tmp_path) -> None:
-    paper = tmp_path / "sxbot-paper.jsonl"
-    odds = from_percent(62.5)
-    paper.write_text(
-        (
-            '{"ts": 1, "action": "join_maker", "market": "0xml", "side": "outcome_two",'
-            f' "label": "San Francisco Giants / Cincinnati Reds", "league": "MLB",'
-            f' "odds": "{odds}", "odds_pct": 62.5, "stake": "5000000", "stake_usdc": 5,'
-            ' "outcome_one": "San Francisco Giants", "outcome_two": "Cincinnati Reds",'
-            ' "style": "mm", "motive": "mm_quote", "game_time": 10}\n'
-        ),
-        encoding="utf-8",
-    )
-    # Giants win → make Cincy lost $5; take SF @ 2.67 won $8.35.
-    client = FakeClient(
-        [
-            {
-                "marketHash": "0xml",
-                "outcomeOneName": "San Francisco Giants",
-                "outcomeTwoName": "Cincinnati Reds",
-                "leagueLabel": "MLB",
-                "outcome": 1,
-                "gameTime": 10,
-            }
-        ]
-    )
-    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
-    rec = snap["record"]
-    assert rec["wins"] == 0
-    assert rec["losses"] == 1
-    assert rec["pnl_usdc"] == -5.0
-    take = rec["take"]
-    assert take["wins"] == 1
-    assert take["losses"] == 0
-    assert take["stake_usdc"] == 5.0
-    assert take["pnl_usdc"] == 8.33
-    assert take["roi_pct"] == 166.6
+    assert "TAKE $5 Cincinnati Reds" in line
+    assert "same side as makers" in line
+    assert "TAKE $5 San Francisco Giants" not in line

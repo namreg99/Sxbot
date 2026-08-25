@@ -30,8 +30,8 @@ class RiskGate:
     def stake_for(self, signal: Signal) -> int | None:
         """Base-units stake, or None to skip a no-edge stale take.
 
-        Filling the heavy book (TAKE_FLOW) is always the flat $5. Kelly is
-        only for leftover crossed quotes (TAKE_STALE).
+        Steam takes (TAKE_FLOW, same team as the makers) are always the
+        flat $5. Kelly is only for leftover crossed quotes (TAKE_STALE).
         """
         if signal.action not in KELLY_ACTIONS:
             return self.stake()

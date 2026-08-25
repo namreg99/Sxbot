@@ -80,10 +80,11 @@ def decimal_odds(prob: float) -> float:
 
 
 def complement_decimal(decimal: float) -> float:
-    """Taker decimal if you fill a maker quote at `decimal`.
+    """What the other person is betting when they fill a maker quote.
 
-    Makers on Cincinnati at 1.60 are betting the Reds. Taking that quote
-    is San Francisco at 1.60 / 0.60 = 2.67.
+    We make San Francisco at 2.45 → someone had to bet Cincinnati at
+    2.45 / 1.45 ≈ 1.69 to fill us. This is the maker-bot fill, not the
+    follow-bot taking the other team.
     """
     if decimal <= 1.0:
         return 0.0

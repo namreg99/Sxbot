@@ -27,8 +27,8 @@ def test_even_money_win() -> None:
     assert bet.pnl_usdc == 5.0
 
 
-def test_take_of_make_is_the_other_team_at_complement_odds() -> None:
-    odds = from_percent(62.5)  # Cincy 1.60
+def test_take_of_make_is_the_mirror_fill_not_the_taker_bot() -> None:
+    odds = from_percent(62.5)  # we made Cincy 1.60; the fill was SF at 2.67
     result, pnl = take_of_make(make_odds=odds, make_result="lose", stake_usdc=5)
     assert result == "win"
     assert pnl == 8.33  # $5 at 2.67 on SF

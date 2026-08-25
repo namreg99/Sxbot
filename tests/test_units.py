@@ -55,8 +55,8 @@ def test_american_and_usdc() -> None:
     assert to_usdc(5_000_000) == 5.0
 
 
-def test_complement_decimal_is_the_take_price() -> None:
-    # Makers on Cincy at 1.60 → taking that quote is SF at 2.67
+def test_complement_decimal_is_the_mirror_fill() -> None:
+    # We make Cincy at 1.60 → someone betting SF at 2.67 is what fills us.
     assert abs(complement_decimal(1.60) - (1.60 / 0.60)) < 1e-9
     assert round(complement_decimal(1.60), 2) == 2.67
     assert complement_decimal(2.0) == 2.0
