@@ -81,9 +81,9 @@ def test_take_style_hits_steam_instead_of_joining() -> None:
     signals = _signals(prev, curr, follow_style="take")
     assert len(signals) == 1
     assert signals[0].action is Action.TAKE_FLOW
-    assert signals[0].side is Side.OUTCOME_ONE
-    # Hit leftover O2 @ 46% → betting O1 at 54%.
-    assert signals[0].maker_odds == from_percent(54.0)
+    assert signals[0].side is Side.OUTCOME_TWO
+    # Fill O1 makers @ 53% → take O2 at 47%.
+    assert signals[0].maker_odds == from_percent(47.0)
     assert signals[0].fair_odds > 0
 
 

@@ -5,7 +5,7 @@ from typing import Any
 
 from sxbot.config import Settings
 from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
-from sxbot.kelly import TAKE_ACTIONS, sized_take_usdc
+from sxbot.kelly import KELLY_ACTIONS, sized_take_usdc
 from sxbot.models import Action, Exposure, Side, Signal
 from sxbot.units import to_base_units
 
@@ -28,8 +28,12 @@ class RiskGate:
         return to_base_units(self.settings.stake_usdc, self.decimals)
 
     def stake_for(self, signal: Signal) -> int | None:
-        """Base-units stake, or None to skip a no-edge take."""
-        if signal.action not in TAKE_ACTIONS:
+        """Base-units stake, or None to skip a no-edge stale take.
+
+        Filling the heavy book (TAKE_FLOW) is always the flat $5. Kelly is
+        only for leftover crossed quotes (TAKE_STALE).
+        """
+        if signal.action not in KELLY_ACTIONS:
             return self.stake()
         sized = sized_take_usdc(self.settings, signal)
         if sized is None:

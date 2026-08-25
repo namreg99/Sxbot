@@ -19,11 +19,15 @@ Every couple of seconds the bot looks at the live prices and asks:
 
 In **paper mode** (the default) it writes "I would have bet $5 on X at 49%" to a file. It does **not** send an order and it does **not** spend money. Real orders only happen if you later turn dry-run off and add keys.
 
-**Take vs make — they are opposite teams.** A maker posting **Cincinnati Reds 1.60** is betting the Reds. If you **take** that quote (fill it now), you are the other side: **San Francisco Giants moneyline** at about 2.67. Do not say "bet the Reds" when the question is a take.
+**MAKE vs TAKE — opposite teams, different odds, different $5 P&L.**
 
-- **Make / limit** — rest with the heavy book. Makers on Cincy at 1.60 → make Reds around 1.61.
-- **Take those quotes** — click the Reds 1.60 offers → Giants ML.
-- The follow bot's `SX_FOLLOW_STYLE=take` is a different button: it pays the spread to *also* get the Reds (hits the Giants makers). When you ask "what should I take?", we mean fill the heavy Reds book and take San Francisco.
+Makers posting **Cincinnati Reds 1.64** are betting the Reds. A $5 **make** on that quote wins **+$3.20** if Cincy wins and loses **−$5** if they don't.
+
+**Taking** that quote is not the Reds. You fill their order, so you are on **San Francisco Giants at 2.56**. A $5 take wins **+$7.80** if the Giants win and loses **−$5** if they don't. Wins and losses are the opposite of the make, and the payout is larger because 2.56 is a dog.
+
+- **MAKE $5** — rest with the heavy book. Cincy @ 1.64.
+- **TAKE $5** — fill those Cincy quotes. Giants ML @ 2.56. This is what the trading bot does on `SX_FOLLOW_STYLE=take`.
+- Stale leftover (`take_stale`) is the exception: you pick up junk through the new mid and stay on the same team as the steam.
 
 **We cannot backtest last season.** SX does not keep old order books, so there is nothing to rewind. What we *can* do is leave paper mode running, then after SX *reports* the market run `sxbot grade`. A TV/scoreboard final is not the same as an SX `outcome` — totals often report first; moneylines and spreads can stay pending for hours. That scores those paper quotes *if they had been filled*. Joining as a maker often does not fill, so graded P&L is the optimistic case.
 
@@ -158,7 +162,7 @@ See `.env.example`. The knobs that matter:
 | Size disappears at the best **and** the tape printed | A taker lifted offers | Ignore — do not copy takers |
 | Leftover quotes sitting through the new mid (crossed book) | Stale size after a steam | Take it — that *is* betting with the makers |
 
-`sxbot flow` prints that classification live. `sxbot run` papers maker-driven motives. `SX_FOLLOW_STYLE=take` hits the informed side immediately instead of resting; `mixed` takes only on strong steam/rotation.
+`sxbot flow` prints that classification live. `sxbot run` papers maker-driven motives. `SX_FOLLOW_STYLE=take` fills the heavy maker quotes (you get the other team at the complement, $5); `mixed` does that only on strong steam/rotation.
 
 ## Fingerprinting wallets before V3
 
@@ -198,7 +202,7 @@ Two unique books sit on the board for the same cards:
 - **$5 flat** — joins and MM ghost fills still *execute* at `SX_STAKE_USDC` (default 5). This is the comparable unique W–L / ROI.
 - **⅝ Kelly shadow** — every join / take / MM fill is also sized against a **$1000 paper bankroll** (between half-Kelly and ¾ Kelly). Fair probability is the book's mid — SX's public API does not send the orange/global line. No edge vs that mid → Kelly **skips** the card (not a loss). Cap is `min(5% of bankroll, SX_MAX_PER_MARKET_USDC)`.
 
-Takes (`SX_FOLLOW_STYLE=take`) still *execute* at Kelly. Joins stay flat. Do not go live from this shadow book.
+Takes (`SX_FOLLOW_STYLE=take`) fill the heavy book at a flat $5. Stale leftover takes still use Kelly. Joins stay flat. Do not go live from this shadow book.
 
 **Live-test gate:** after **100 unique settled** paper trades (follow + MM), the board flags `ready` only if **both** books are profitable. That flag is a tracker, not a deploy. Keep `SX_DRY_RUN=true` until you explicitly say to test live.
 

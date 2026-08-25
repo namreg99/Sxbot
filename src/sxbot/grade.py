@@ -21,7 +21,7 @@ from typing import Any
 from sxbot.api import lookup_market
 from sxbot.filters import STYLE_MM
 from sxbot.models import Action
-from sxbot.units import payout, to_usdc
+from sxbot.units import ODDS_SCALE, payout, to_base_units, to_usdc
 
 
 @dataclass(frozen=True)
@@ -120,6 +120,35 @@ def _result_for(side: str, outcome: int | None) -> str:
     if outcome in {1, 2}:
         return "lose"
     return "pending"
+
+
+def take_of_make(
+    *,
+    make_odds: int,
+    make_result: str,
+    stake_usdc: float,
+    decimals: int = 6,
+) -> tuple[str, float | None]:
+    """$5 take of a maker quote: other team, complementary odds.
+
+    Makers on Cincinnati at 1.64 (61%) — taking that quote is San Francisco
+    at 2.56. If the make won, the take lost, and the other way around.
+    """
+    if make_result == "pending":
+        return "pending", None
+    if make_result == "missing":
+        return "missing", None
+    if make_result == "void":
+        return "void", 0.0
+    take_odds = ODDS_SCALE - int(make_odds)
+    stake = to_base_units(stake_usdc, decimals)
+    if make_result == "win":
+        return "lose", -float(stake_usdc)
+    if make_result == "lose":
+        if take_odds <= 0:
+            return "win", None
+        return "win", round(to_usdc(payout(stake, take_odds) - stake, decimals), 2)
+    return make_result, None
 
 
 def grade_row(row: dict[str, Any], market: dict[str, Any] | None, *, decimals: int = 6) -> GradedBet:

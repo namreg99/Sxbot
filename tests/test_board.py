@@ -180,8 +180,8 @@ def test_board_snapshot_and_html(tmp_path) -> None:
     assert "live-test gate" in page
     text = render_text(snap)
     assert "follow best priced" in text
-    assert "make Uchijima" in text
-    assert "take Hercog" in text
+    assert "MAKE $5 Uchijima" in text
+    assert "TAKE $5 Hercog" in text
     assert "live-test gate" in text
 
 
@@ -467,10 +467,51 @@ def test_taking_cincy_makers_is_named_as_sf_ml(tmp_path) -> None:
     assert open_row["take_decimal"] == 2.67
     assert open_row["verb"] == "make"
     line = make_take_line(open_row)
-    assert "make Cincinnati Reds 1.6" in line
-    assert "take San Francisco Giants 2.67" in line
+    assert "MAKE $5 Cincinnati Reds @1.6" in line
+    assert "TAKE $5 San Francisco Giants @2.67" in line
+    assert "win +$3.00" in line
+    assert "win +$8.35" in line
     page = render_html(snap)
-    assert "take San Francisco Giants" in page
-    assert "make Cincinnati Reds" in page
+    assert "TAKE $5 San Francisco Giants @2.67" in page
+    assert "MAKE $5 Cincinnati Reds @1.6" in page
     text = render_text(snap)
-    assert "take San Francisco Giants 2.67" in text
+    assert "TAKE $5 San Francisco Giants @2.67" in text
+
+
+def test_take_roi_uses_complement_odds_and_flips_the_result(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    odds = from_percent(62.5)
+    paper.write_text(
+        (
+            '{"ts": 1, "action": "join_maker", "market": "0xml", "side": "outcome_two",'
+            f' "label": "San Francisco Giants / Cincinnati Reds", "league": "MLB",'
+            f' "odds": "{odds}", "odds_pct": 62.5, "stake": "5000000", "stake_usdc": 5,'
+            ' "outcome_one": "San Francisco Giants", "outcome_two": "Cincinnati Reds",'
+            ' "style": "mm", "motive": "mm_quote", "game_time": 10}\n'
+        ),
+        encoding="utf-8",
+    )
+    # Giants win → make Cincy lost $5; take SF @ 2.67 won $8.35.
+    client = FakeClient(
+        [
+            {
+                "marketHash": "0xml",
+                "outcomeOneName": "San Francisco Giants",
+                "outcomeTwoName": "Cincinnati Reds",
+                "leagueLabel": "MLB",
+                "outcome": 1,
+                "gameTime": 10,
+            }
+        ]
+    )
+    snap = build_snapshot(client, make_settings(paper_log=str(paper)), tape_rows=[])
+    rec = snap["record"]
+    assert rec["wins"] == 0
+    assert rec["losses"] == 1
+    assert rec["pnl_usdc"] == -5.0
+    take = rec["take"]
+    assert take["wins"] == 1
+    assert take["losses"] == 0
+    assert take["stake_usdc"] == 5.0
+    assert take["pnl_usdc"] == 8.33
+    assert take["roi_pct"] == 166.6

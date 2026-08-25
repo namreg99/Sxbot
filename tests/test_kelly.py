@@ -61,7 +61,7 @@ def test_sized_take_uses_signal_fair_odds() -> None:
     signal = Signal(
         market=market,
         side=Side.OUTCOME_ONE,
-        action=Action.TAKE_FLOW,
+        action=Action.TAKE_STALE,
         maker_odds=from_percent(50.0),
         reason="steam",
         mid_move_bps=40,
@@ -71,6 +71,19 @@ def test_sized_take_uses_signal_fair_odds() -> None:
     )
     settings = make_settings(bankroll_usdc=1000, kelly_fraction=0.625, max_per_market_usdc=25)
     assert sized_take_usdc(settings, signal) == 25.0
+    flow = Signal(
+        market=market,
+        side=Side.OUTCOME_TWO,
+        action=Action.TAKE_FLOW,
+        maker_odds=from_percent(47.0),
+        reason="fill makers",
+        mid_move_bps=40,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(47.0),
+    )
+    # Filling the heavy book stays a flat $5. Kelly is only for stale leftover.
+    assert sized_take_usdc(settings, flow) is None
     join = Signal(
         market=market,
         side=Side.OUTCOME_ONE,
@@ -122,7 +135,7 @@ def test_risk_stake_for_skips_no_edge_take() -> None:
     signal = Signal(
         market=make_market(),
         side=Side.OUTCOME_ONE,
-        action=Action.TAKE_FLOW,
+        action=Action.TAKE_STALE,
         maker_odds=from_percent(50.0),
         reason="steam",
         mid_move_bps=40,
@@ -131,6 +144,18 @@ def test_risk_stake_for_skips_no_edge_take() -> None:
         fair_odds=from_percent(50.0),
     )
     assert gate.stake_for(signal) is None
+    flow = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_TWO,
+        action=Action.TAKE_FLOW,
+        maker_odds=from_percent(39.0),
+        reason="fill makers",
+        mid_move_bps=40,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(39.0),
+    )
+    assert gate.stake_for(flow) == to_base_units(5)
 
 
 def test_allow_uses_passed_kelly_stake() -> None:

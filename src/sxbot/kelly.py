@@ -20,6 +20,7 @@ from sxbot.models import Action, Signal
 from sxbot.units import decimal_odds, to_prob
 
 TAKE_ACTIONS = {Action.TAKE_STALE, Action.TAKE_FLOW}
+KELLY_ACTIONS = {Action.TAKE_STALE}
 TRADE_ACTIONS = {Action.JOIN_MAKER, Action.TAKE_STALE, Action.TAKE_FLOW, Action.MM_FILL}
 _TRADE_ACTION_VALUES = {action.value for action in TRADE_ACTIONS}
 
@@ -81,8 +82,8 @@ def kelly_stake_usdc(settings: object, *, p: float, decimal: float) -> float | N
 
 
 def sized_take_usdc(settings: object, signal: Signal) -> float | None:
-    """Kelly size for a take, or None to skip. Joins are not sized here."""
-    if signal.action not in TAKE_ACTIONS:
+    """Kelly size for a stale take, or None to skip. Fill-the-quotes takes stay $5."""
+    if signal.action not in KELLY_ACTIONS:
         return None
     if not bool(getattr(settings, "kelly_on_takes", True)):
         return float(getattr(settings, "stake_usdc", 5))

@@ -2,7 +2,7 @@
 
 SX_FOLLOW_STYLE:
 - join  — rest behind makers (default). Still take leftover crossed quotes.
-- take  — hit the informed side now (pay the spread, get the position).
+- take  — fill the heavy maker quotes now (you get the other team).
 - mixed — take on strong steam/rotation; otherwise join.
 """
 
@@ -34,10 +34,22 @@ def _join_odds(view: BookView, side: Side, ladder: OddsLadder, ticks_behind: int
 
 
 def _take_against(view: BookView, side: Side) -> int | None:
+    """Hit the opposite book to *get* `side` (stale leftover / with the steam)."""
     opposite = view.best(side.opposite())
     if opposite is None:
         return None
     return taker_odds(opposite)
+
+
+def _fill_maker_quotes(view: BookView, maker_side: Side) -> int | None:
+    """Fill makers on `maker_side`. You get the other team at complementary odds.
+
+    Makers on Cincinnati at 1.64 → this returns San Francisco at 2.56.
+    """
+    best = view.best(maker_side)
+    if best is None:
+        return None
+    return taker_odds(best)
 
 
 def _signal(
@@ -49,14 +61,16 @@ def _signal(
     *,
     crossed: bool,
     style: str,
+    side: Side | None = None,
 ) -> Signal:
     assert report.side is not None
+    pos = side if side is not None else report.side
     fair = 0
     if view.mid_one is not None:
-        fair = view.mid_one if report.side is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
+        fair = view.mid_one if pos is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
     return Signal(
         market=market,
-        side=report.side,
+        side=pos,
         action=action,
         maker_odds=price,
         reason="; ".join(report.reasons) or report.motive.value,
@@ -79,13 +93,17 @@ def _priced(
     settings: Settings,
     *,
     crossed: bool,
+    side: Side | None = None,
+    style_odds: int | None = None,
 ) -> Signal | None:
     if longshot_skip_reason(price, settings):
         return None
-    style = quote_style(market, price, settings)
+    style = quote_style(market, style_odds if style_odds is not None else price, settings)
     if not style:
         return None
-    return _signal(market, report, view, action, price, crossed=crossed, style=style)
+    return _signal(
+        market, report, view, action, price, crossed=crossed, style=style, side=side
+    )
 
 
 def evaluate(
@@ -133,10 +151,19 @@ def evaluate(
         or (follow == "mixed" and report.confidence >= 0.7)
     )
     if take_now:
-        price = _take_against(curr, report.side)
-        if price is not None:
+        maker_best = curr.best(report.side)
+        price = _fill_maker_quotes(curr, report.side)
+        if price is not None and maker_best is not None:
             signal = _priced(
-                market, report, curr, Action.TAKE_FLOW, price, settings, crossed=curr.crossed
+                market,
+                report,
+                curr,
+                Action.TAKE_FLOW,
+                price,
+                settings,
+                crossed=curr.crossed,
+                side=report.side.opposite(),
+                style_odds=maker_best,
             )
             if signal is not None:
                 signals.append(signal)

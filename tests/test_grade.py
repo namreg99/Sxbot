@@ -1,4 +1,4 @@
-from sxbot.grade import format_grade, grade_paper, grade_row
+from sxbot.grade import format_grade, grade_paper, grade_row, take_of_make
 from sxbot.units import from_percent, to_base_units
 
 
@@ -25,6 +25,16 @@ def test_even_money_win() -> None:
     bet = grade_row(_paper(), market)
     assert bet.result == "win"
     assert bet.pnl_usdc == 5.0
+
+
+def test_take_of_make_is_the_other_team_at_complement_odds() -> None:
+    odds = from_percent(62.5)  # Cincy 1.60
+    result, pnl = take_of_make(make_odds=odds, make_result="lose", stake_usdc=5)
+    assert result == "win"
+    assert pnl == 8.33  # $5 at 2.67 on SF
+    result, pnl = take_of_make(make_odds=odds, make_result="win", stake_usdc=5)
+    assert result == "lose"
+    assert pnl == -5.0
 
 
 def test_lose_and_void_and_pending() -> None:

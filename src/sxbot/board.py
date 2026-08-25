@@ -22,7 +22,7 @@ from sxbot.api import SxClient, index_markets, lookup_market
 from sxbot.config import Settings
 from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
-from sxbot.grade import _picked_name, grade_row, opposite_side
+from sxbot.grade import _picked_name, grade_row, opposite_side, take_of_make
 from sxbot.journal import load_all_paper
 from sxbot.kelly import shadow_kelly_from_row
 from sxbot.units import complement_decimal, decimal_odds, to_percent, to_prob
@@ -290,10 +290,11 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
     dec = decimal_odds(to_prob(odds)) if odds else 0.0
     decimal = round(dec, 2) if dec else None
     stake = float(row.get("stake_usdc") or bet.stake_usdc or 0)
-    take_dec = round(complement_decimal(dec), 2) if dec else None
-    take_picked = _picked_name(row, None, opposite_side(bet.side), bet.label)
+    take_stake = float(getattr(settings, "stake_usdc", 5) or 5)
+    opp = opposite_side(bet.side)
+    other_name = _picked_name(row, None, opp, bet.label) or opp
+    other_dec = round(complement_decimal(dec), 2) if dec else None
     action = bet.action
-    # join/mm rest on `picked`. Filling those quotes is a take of the other team.
     if action in {"take_stale", "take_flow"}:
         verb = "take"
     elif action == "mm_fill":
@@ -302,6 +303,30 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
         verb = "cancel"
     else:
         verb = "make"
+    # TAKE_FLOW fills the heavy quotes → logged side is already the take.
+    # JOIN/MM rest on the heavy quotes → take is the other team at complement odds.
+    if action == "take_flow":
+        make_on = other_name
+        make_decimal = other_dec
+        take_on = bet.picked or bet.side
+        take_decimal = decimal
+        take_result, take_pnl = bet.result, bet.pnl_usdc
+    elif action in {"join_maker", "mm_fill", "cancel"} or verb == "make":
+        make_on = bet.picked or bet.side
+        make_decimal = decimal
+        take_on = other_name
+        take_decimal = other_dec
+        take_result, take_pnl = take_of_make(
+            make_odds=odds,
+            make_result=str(bet.result or ""),
+            stake_usdc=take_stake,
+        )
+    else:
+        make_on = bet.picked or bet.side
+        make_decimal = decimal
+        take_on = other_name
+        take_decimal = other_dec
+        take_result, take_pnl = None, None
     view = {
         "ts": float(row.get("ts") or 0),
         "when": _utc(row.get("ts")),
@@ -309,11 +334,17 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
         "action": action,
         "verb": verb,
         "picked": bet.picked or bet.side,
-        "take_picked": take_picked or opposite_side(bet.side),
+        "make_on": make_on,
+        "make_decimal": make_decimal,
+        "take_picked": take_on,
+        "take_on": take_on,
+        "take_decimal": take_decimal,
+        "take_result": take_result,
+        "take_pnl_usdc": None if take_pnl is None else round(float(take_pnl), 2),
+        "take_stake_usdc": take_stake,
         "label": bet.label,
         "league": bet.league,
         "decimal": decimal,
-        "take_decimal": take_dec,
         "odds_pct": bet.odds_pct,
         "result": bet.result,
         "pnl_usdc": bet.pnl_usdc,
@@ -329,21 +360,39 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
     return _attach_books(view, row, settings)
 
 
+def _win_lose_dollars(decimal: float | None, stake: float) -> str:
+    if not decimal or decimal <= 1 or stake <= 0:
+        return ""
+    return f"  win +${stake * (decimal - 1):.2f} / lose −${stake:.0f}"
+
+
 def make_take_line(b: dict[str, Any]) -> str:
-    """Makers on Cincy at 1.60 → make Reds 1.60 · take Giants 2.67."""
+    """MAKE = same team as the resting quotes. TAKE = fill them (other team)."""
+    stake = float(b.get("take_stake_usdc") or b.get("flat_stake_usdc") or b.get("stake_usdc") or 5)
     action = str(b.get("action") or "")
-    picked = str(b.get("picked") or "")
-    dec = b.get("decimal")
-    dec_s = f" {dec}" if dec is not None else ""
-    if action in {"take_stale", "take_flow"}:
-        return f"take {picked}{dec_s} (with makers)"
-    take_name = str(b.get("take_picked") or "")
+    make_on = str(b.get("make_on") or b.get("picked") or "")
+    make_dec = b.get("make_decimal") if b.get("make_decimal") is not None else b.get("decimal")
+    take_on = str(b.get("take_on") or b.get("take_picked") or "")
     take_dec = b.get("take_decimal")
-    take_s = f" {take_dec}" if take_dec is not None else ""
-    make_s = f"make {picked}{dec_s}"
-    if take_name:
-        return f"{make_s} · take {take_name}{take_s}"
-    return make_s
+    if action == "take_flow":
+        return (
+            f"TAKE ${stake:g} {take_on} @{take_dec}"
+            f"{_win_lose_dollars(take_dec, stake)}"
+            f"  (makers were on {make_on} @{make_dec})"
+        )
+    if action == "take_stale":
+        picked = str(b.get("picked") or "")
+        return (
+            f"TAKE ${stake:g} {picked} @{b.get('decimal')}"
+            f"{_win_lose_dollars(b.get('decimal'), stake)}"
+            f"  (stale leftover — same team as the steam)"
+        )
+    return (
+        f"MAKE ${stake:g} {make_on} @{make_dec}"
+        f"{_win_lose_dollars(make_dec, stake)}"
+        f"  ·  TAKE ${stake:g} {take_on} @{take_dec}"
+        f"{_win_lose_dollars(take_dec, stake)}"
+    )
 
 
 def _record(views: list[dict[str, Any]]) -> dict[str, Any]:
@@ -398,6 +447,16 @@ def paper_record(views: list[dict[str, Any]]) -> dict[str, Any]:
     rec["kelly"] = _remap_record(
         views, "kelly_stake_usdc", "kelly_pnl_usdc", require_stake=True
     )
+    take_views: list[dict[str, Any]] = []
+    for view in views:
+        if view.get("take_result") not in {"win", "lose", "pending"}:
+            continue
+        item = dict(view)
+        item["result"] = view["take_result"]
+        item["stake_usdc"] = float(view.get("take_stake_usdc") or 5)
+        item["pnl_usdc"] = view.get("take_pnl_usdc")
+        take_views.append(item)
+    rec["take"] = _record(take_views)
     return rec
 
 
@@ -563,6 +622,16 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
                 f" · Kelly {kelly.get('wins', 0)}–{kelly.get('losses', 0)}"
                 f"{k_roi_s}{k_pnl_s}{skip_s}"
             )
+        take = r.get("take") if books else None
+        if take and _settled_n(take):
+            t_roi = take.get("roi_pct")
+            t_roi_s = f"  ROI {t_roi:+.0f}%" if t_roi is not None else ""
+            t_pnl = take.get("pnl_usdc")
+            t_pnl_s = f"  PnL {t_pnl:+.2f}" if t_pnl is not None else ""
+            line += (
+                f" · TAKE $5 {take.get('wins', 0)}–{take.get('losses', 0)}"
+                f"{t_roi_s}{t_pnl_s}"
+            )
         return line
 
     def gate_s(g: dict[str, Any] | None) -> str:
@@ -682,7 +751,7 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 <header>
   <h1>sxbot board</h1>
   <div class="meta">open <b>http://127.0.0.1:8765</b> on the <i>same machine</i> as <code>sxbot board</code> · auto-refresh {int(refresh)}s · {html.escape(str(snap.get("generated_at") or ""))} ·
-    <b>make</b> = rest with the heavy book (you are on that team) · <b>take</b> = fill those quotes (you get the other team) · paper assumes fills</div>
+    <b>MAKE $5</b> = same team as the resting quotes, at that price · <b>TAKE $5</b> = fill those quotes (other team at the complement — Cincy 1.64 make → SF 2.56 take) · paper assumes fills</div>
 </header>
 <div class="kpis">
   <div class="kpi"><b>follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced"), books=True))}</div>
@@ -747,6 +816,14 @@ def render_text(snap: dict[str, Any]) -> str:
             line += (
                 f"  Kelly {kelly.get('wins', 0)}–{kelly.get('losses', 0)}"
                 f" ({k_roi_s.strip()}{skip_s})"
+            )
+        take = r.get("take") if books else None
+        if take and _settled_n(take):
+            t_roi = take.get("roi_pct")
+            t_roi_s = f" ROI {t_roi:+.0f}%" if t_roi is not None else ""
+            line += (
+                f"  TAKE $5 {take.get('wins', 0)}–{take.get('losses', 0)}"
+                f" ({t_roi_s.strip()})"
             )
         return line
 
