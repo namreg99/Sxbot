@@ -33,15 +33,28 @@ def paper_log_for(path: str | Path, style: str) -> Path:
     return file.with_name(f"{file.stem}-{style}{file.suffix}")
 
 
+# History rescued from process logs after a file was deleted (Aug 21-24 book).
+RECOVERED_STYLE = "recovered"
+
+
 def iter_paper_logs(path: str | Path) -> list[Path]:
-    """Per-style paper logs. Skip the mixed unstyled dump once those exist."""
+    """Every paper log that exists: legacy dump, per-style files, recovered.
+
+    Paper logs are append-only history. NEVER delete one — the Aug 21-24
+    unique book (37-33 at the time) lived only in the mixed dump and was
+    lost when that file was erased during the per-style split. Each row is
+    written to exactly one file, so loading them all does not double count.
+    """
     file = Path(path)
-    style_files = [p for p in (paper_log_for(file, style) for style in QUOTE_STYLES) if p.exists()]
-    candidates = style_files if style_files else ([file] if file.exists() else [])
+    candidates = [file]
+    candidates.extend(paper_log_for(file, style) for style in QUOTE_STYLES)
+    candidates.append(paper_log_for(file, RECOVERED_STYLE))
     out: list[Path] = []
     seen: set[Path] = set()
     for candidate in candidates:
-        key = candidate.resolve() if candidate.exists() else candidate
+        if not candidate.exists():
+            continue
+        key = candidate.resolve()
         if key in seen:
             continue
         seen.add(key)

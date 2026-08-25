@@ -51,7 +51,9 @@ The bot defaults to **mainnet**. It sums V2 resting orders by price/side into th
 
 ## Is it paper trading? Is it recording?
 
-Only while `sxbot run` is actually running. There is no background daemon. Dry-run is the default (`SX_DRY_RUN=true`): intended orders go to `sxbot-paper-{mlb,soccer,tennis_short,tennis_dog}.jsonl` and nothing is signed. `sxbot mm` writes `sxbot-paper-mm.jsonl`. The old mixed `sxbot-paper.jsonl` dump is not loaded once those style files exist — erase it if it is still around. Flow events go to `sxbot-flow.jsonl`. `sxbot summary` prints both.
+Only while `sxbot run` is actually running. There is no background daemon. Dry-run is the default (`SX_DRY_RUN=true`): intended orders go to `sxbot-paper-{mlb,soccer,tennis_short,tennis_dog}.jsonl` and nothing is signed. `sxbot mm` writes `sxbot-paper-mm.jsonl`. Flow events go to `sxbot-flow.jsonl`. `sxbot summary` prints both.
+
+**Paper logs are append-only history. Never delete one.** Every `sxbot-paper*.jsonl` that exists is loaded — the legacy mixed dump, the per-style files, and `sxbot-paper-recovered.jsonl` (history rebuilt from process logs after the original Aug 21–24 book was erased; its first day is unrecoverable and skews the recovered card green). Each row is written to exactly one file, so loading them all does not double count.
 
 The board keeps **taker unique** (`sxbot run`) and **maker unique** (`sxbot mm`) on separate cards. Combined unique is the live-test gate only — do not read it as one bot's ROI. A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side.
 

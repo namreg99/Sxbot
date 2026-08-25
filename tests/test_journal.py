@@ -25,10 +25,11 @@ def test_summary_counts_motive_and_phase(tmp_path) -> None:
     assert load_jsonl(flow)[0]["motive"] == "maker_steam"
 
 
-def test_summary_includes_style_paper_logs(tmp_path) -> None:
+def test_all_paper_logs_load_nothing_is_orphaned(tmp_path) -> None:
     flow = tmp_path / "flow.jsonl"
     paper = tmp_path / "sxbot-paper.jsonl"
     styled = tmp_path / "sxbot-paper-mlb.jsonl"
+    recovered = tmp_path / "sxbot-paper-recovered.jsonl"
     flow.write_text("", encoding="utf-8")
     paper.write_text(
         '{"action":"join_maker","phase":"pregame","side":"outcome_one","label":"old","odds_pct":52.0,"stake_usdc":5,"ts":1}\n',
@@ -38,11 +39,21 @@ def test_summary_includes_style_paper_logs(tmp_path) -> None:
         '{"action":"join_maker","phase":"pregame","side":"outcome_one","label":"mlb","odds_pct":51.0,"stake_usdc":5,"ts":2}\n',
         encoding="utf-8",
     )
+    recovered.write_text(
+        '{"action":"join_maker","phase":"pregame","side":"outcome_one","label":"rec","odds_pct":50.0,"stake_usdc":5,"ts":3,"style":"recovered"}\n',
+        encoding="utf-8",
+    )
     text = format_summary(flow, paper)
-    assert "sxbot-paper.jsonl" not in text
+    # Legacy dump and recovered history load alongside style files — history
+    # in an old file must never silently drop out of the books again.
+    assert "sxbot-paper.jsonl" in text
     assert "sxbot-paper-mlb.jsonl" in text
-    assert "intended stake  5.0 USDC" in text
-    assert [p.name for p in iter_paper_logs(paper)] == ["sxbot-paper-mlb.jsonl"]
+    assert "sxbot-paper-recovered.jsonl" in text
+    assert [p.name for p in iter_paper_logs(paper)] == [
+        "sxbot-paper.jsonl",
+        "sxbot-paper-mlb.jsonl",
+        "sxbot-paper-recovered.jsonl",
+    ]
 
 
 def test_follow_paper_drops_mm_quotes(tmp_path) -> None:
