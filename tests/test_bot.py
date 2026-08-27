@@ -1,8 +1,10 @@
-from sxbot.bot import RadarRow, format_radar, outcome_name, pick_universe, plain_pick_sentence, plain_picks
+import json
+
+from sxbot.bot import Bot, RadarRow, format_radar, outcome_name, pick_universe, plain_pick_sentence, plain_picks
 from sxbot.flow import FlowReport, Motive
 from sxbot.models import Side
 from sxbot.orderbook import analyze
-from tests.conftest import make_book, make_market
+from tests.conftest import make_book, make_market, make_settings
 
 
 def test_soonest_pregame_first_and_reserves_live_slots() -> None:
@@ -54,6 +56,48 @@ def test_pick_universe_prefers_quoteable_sports() -> None:
 
     picked = pick_universe([npb, mlb], cap=1, now=now, watch_live=False, prefer=quote_family)
     assert [m.market_hash for m in picked] == ["mlb"]
+
+
+class _FakeRisk:
+    def __init__(self, joined: set[tuple[str, str]]) -> None:
+        self.joined_sides = joined
+
+
+def _bare_bot(tmp_path, joined: set[tuple[str, str]]) -> Bot:
+    bot = Bot.__new__(Bot)
+    bot.settings = make_settings(closes_log=str(tmp_path / "sxbot-closes.jsonl"))
+    bot.risk = _FakeRisk(joined)
+    bot._pregame_mid = {}
+    bot._closed = set()
+    return bot
+
+
+def test_close_is_stamped_once_at_kickoff(tmp_path) -> None:
+    bot = _bare_bot(tmp_path, {("0xm", "outcome_one")})
+    market = make_market(market_hash="0xm", game_time=1_000)
+    pregame = analyze(make_book(o1=((52.0, 10),), o2=((46.0, 10),), version="1"))
+    live = analyze(make_book(o1=((70.0, 10),), o2=((28.0, 10),), version="2"))
+    # pregame polls hold the mid; nothing written yet
+    bot._track_close(market, pregame, now=900)
+    assert not (tmp_path / "sxbot-closes.jsonl").exists()
+    # kickoff passes: the LAST PREGAME mid becomes the close, not the live one
+    bot._track_close(market, live, now=1_001)
+    rows = [json.loads(l) for l in (tmp_path / "sxbot-closes.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+    assert rows[0]["market"] == "0xm"
+    assert rows[0]["close_mid_pct"] == 53.0  # mid of 52/46 book, not the 70/28 live book
+    # a later poll does not double-write
+    bot._track_close(market, live, now=1_002)
+    rows = [json.loads(l) for l in (tmp_path / "sxbot-closes.jsonl").read_text().splitlines()]
+    assert len(rows) == 1
+
+
+def test_close_skips_markets_we_never_papered(tmp_path) -> None:
+    bot = _bare_bot(tmp_path, set())
+    market = make_market(market_hash="0xother", game_time=1_000)
+    view = analyze(make_book(o1=((52.0, 10),), o2=((46.0, 10),)))
+    bot._track_close(market, view, now=1_001)
+    assert not (tmp_path / "sxbot-closes.jsonl").exists()
 
 
 def _radar_row(*, confidence: float) -> RadarRow:

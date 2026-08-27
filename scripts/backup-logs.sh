@@ -7,6 +7,7 @@ mkdir -p "$STORE"
 while true; do
     cp -f /workspace/sxbot-paper*.jsonl "$STORE"/ 2>/dev/null
     cp -f /workspace/sxbot-flow.jsonl "$STORE"/ 2>/dev/null
+    cp -f /workspace/sxbot-closes.jsonl "$STORE"/ 2>/dev/null
     date -u +"backed up %Y-%m-%dT%H:%M:%SZ"
     sleep 900
 done

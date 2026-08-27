@@ -4,7 +4,9 @@ from sxbot.board import (
     _record,
     _tape_windows,
     _windows,
+    attach_clv,
     build_snapshot,
+    clv_record,
     live_test_status,
     make_take_line,
     paper_record,
@@ -514,6 +516,54 @@ def test_maker_unique_scores_at_maker_odds_not_the_mirror(tmp_path) -> None:
     assert rec["pnl_usdc"] == -5.0
     assert "take" not in rec
     assert snap["follow_record"]["n"] == 0
+
+
+def test_clv_is_closing_prob_of_our_side_minus_our_price() -> None:
+    closes = {"0xm": 60.0}  # outcome one closed at 60%
+    ours = attach_clv({"market": "0xm", "side": "outcome_one", "odds_pct": 55.0}, closes)
+    # bet O1 at 55%, closed 60% -> we beat the close by 5 points
+    assert ours["clv_pct"] == 5.0
+    other = attach_clv({"market": "0xm", "side": "outcome_two", "odds_pct": 45.0}, closes)
+    # bet O2 at 45%, O2 closed 40% -> we paid 5 points worse than close
+    assert other["clv_pct"] == -5.0
+    missing = attach_clv({"market": "0xnothere", "side": "outcome_one", "odds_pct": 50.0}, closes)
+    assert missing["clv_pct"] is None
+    rec = clv_record([ours, other, missing])
+    assert rec["n"] == 2
+    assert rec["avg_clv_pct"] == 0.0
+    assert rec["beat_close"] == 1
+    assert rec["lost_close"] == 1
+
+
+def test_snapshot_stamps_clv_from_closes_log(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    odds = from_percent(55.0)
+    paper.write_text(
+        (
+            '{"ts": 1, "action": "join_maker", "market": "0xm", "side": "outcome_one",'
+            f' "label": "A / B", "league": "MLB", "odds": "{odds}", "odds_pct": 55.0,'
+            ' "stake": "5000000", "stake_usdc": 5, "outcome_one": "A", "outcome_two": "B",'
+            ' "style": "mlb", "motive": "maker_steam", "game_time": 10}\n'
+        ),
+        encoding="utf-8",
+    )
+    closes = tmp_path / "sxbot-closes.jsonl"
+    closes.write_text(
+        '{"action": "close", "market": "0xm", "close_mid_pct": 60.0}\n', encoding="utf-8"
+    )
+    client = FakeClient([{"marketHash": "0xm", "outcomeOneName": "A", "outcomeTwoName": "B"}])
+    snap = build_snapshot(
+        client,
+        make_settings(paper_log=str(paper), closes_log=str(closes)),
+        tape_rows=[],
+    )
+    assert snap["follow_clv"]["n"] == 1
+    assert snap["follow_clv"]["avg_clv_pct"] == 5.0
+    assert snap["follow_clv"]["beat_close"] == 1
+    page = render_html(snap)
+    assert "taker CLV" in page
+    text = render_text(snap)
+    assert "taker CLV vs close" in text
 
 
 def test_take_flow_is_the_same_team_as_makers(tmp_path) -> None:

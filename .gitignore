@@ -12,6 +12,7 @@ sxbot-paper.jsonl
 sxbot-paper-*.jsonl
 sxbot-mimic.jsonl
 sxbot-flow.jsonl
+sxbot-closes.jsonl
 sxbot-sharp.jsonl
 sxbot-history.sqlite
 sxbot-history.sqlite-*

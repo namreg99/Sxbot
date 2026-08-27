@@ -23,7 +23,7 @@ from sxbot.config import Settings
 from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
 from sxbot.grade import _picked_name, grade_row, opposite_side
-from sxbot.journal import load_all_paper
+from sxbot.journal import load_all_paper, load_jsonl
 from sxbot.kelly import shadow_kelly_from_row
 from sxbot.units import complement_decimal, decimal_odds, to_percent, to_prob
 from sxbot.wallets import CANDIDATE_WALLETS, KNOWN_WALLETS, labeled_addresses
@@ -263,6 +263,51 @@ def scale_pnl(
     if result == "lose":
         return round(-float(dest_stake), 2)
     return None
+
+
+def load_closes(path: str) -> dict[str, float]:
+    """market hash -> implied % of outcome one at kickoff (the closing line)."""
+    out: dict[str, float] = {}
+    for row in load_jsonl(path):
+        market = str(row.get("market") or "")
+        close = row.get("close_mid_pct")
+        if not market or close in (None, ""):
+            continue
+        try:
+            out[market] = float(close)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def attach_clv(view: dict[str, Any], closes: dict[str, float]) -> dict[str, Any]:
+    """CLV in probability points: closing prob of our side minus our price.
+
+    Positive = we got a better price than the close. This converges on real
+    edge much faster than W-L, and cannot be faked by betting favorites.
+    """
+    close_one = closes.get(str(view.get("market") or ""))
+    odds_pct = view.get("odds_pct")
+    if close_one is None or odds_pct in (None, "", 0):
+        view["clv_pct"] = None
+        return view
+    side = str(view.get("side") or "")
+    close_side = close_one if side == "outcome_one" else 100.0 - close_one
+    view["clv_pct"] = round(close_side - float(odds_pct), 3)
+    return view
+
+
+def clv_record(views: list[dict[str, Any]]) -> dict[str, Any]:
+    scored = [v for v in views if v.get("clv_pct") is not None]
+    if not scored:
+        return {"n": 0, "avg_clv_pct": None, "beat_close": 0, "lost_close": 0}
+    values = [float(v["clv_pct"]) for v in scored]
+    return {
+        "n": len(scored),
+        "avg_clv_pct": round(sum(values) / len(values), 3),
+        "beat_close": sum(1 for v in values if v > 0),
+        "lost_close": sum(1 for v in values if v < 0),
+    }
 
 
 def _attach_books(view: dict[str, Any], row: dict[str, Any], settings: Settings) -> dict[str, Any]:
@@ -515,8 +560,11 @@ def build_snapshot(
     today_fills = [f for f in fills if f["ts"] >= t0]
     yday_fills = [f for f in fills if y0 <= f["ts"] < t0]
 
+    closes = load_closes(getattr(settings, "closes_log", "sxbot-closes.jsonl"))
+
     def _view_row(row: dict[str, Any]) -> dict[str, Any]:
-        return _paper_view(grade_row(row, lookup_market(markets, str(row.get("market") or ""))), row, settings)
+        view = _paper_view(grade_row(row, lookup_market(markets, str(row.get("market") or ""))), row, settings)
+        return attach_clv(view, closes)
 
     life_bets = [_view_row(row) for row in unique_lifetime_rows(paper_rows)]
     open_bets = [
@@ -554,6 +602,7 @@ def build_snapshot(
         "record": record,
         "follow_record": follow_record,
         "mm_record": mm_record,
+        "follow_clv": clv_record(follow_bets),
         "best_priced": {
             **paper_record(best_priced),
             "max_decimal": BEST_PRICED_MAX_DECIMAL,
@@ -606,6 +655,16 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
         return (
             f"{g.get('settled', 0)}/{g.get('target', LIVE_TEST_TRADES)} unique settled  "
             f"follow {g.get('follow_settled', 0)} · MM {g.get('mm_settled', 0)}  · {flag}"
+        )
+
+    def clv_s(c: dict[str, Any] | None) -> str:
+        if not c or not c.get("n"):
+            return "no closes stamped yet (needs a card to pass kickoff)"
+        avg = c.get("avg_clv_pct")
+        avg_s = f"{avg:+.2f} pts" if avg is not None else "—"
+        return (
+            f"avg {avg_s} vs close  ·  beat close {c.get('beat_close', 0)} / "
+            f"lost {c.get('lost_close', 0)}  (n={c.get('n', 0)})"
         )
 
     def fill_rows(rows: list[dict[str, Any]]) -> str:
@@ -725,6 +784,7 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
   <div class="kpi"><b>taker bot unique (`sxbot run`)</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
   <div class="kpi"><b>maker bot unique (`sxbot mm`)</b>{html.escape(rec(snap.get("mm_record"), books=True))}</div>
   <div class="kpi"><b>combined unique (gate only — do not mix ROI)</b>{html.escape(rec(snap.get("record"), books=True))}</div>
+  <div class="kpi"><b>taker CLV (price vs closing line)</b>{html.escape(clv_s(snap.get("follow_clv")))}</div>
   <div class="kpi"><b>live-test gate ({LIVE_TEST_TRADES} unique settled)</b>{html.escape(gate_s(snap.get("live_test")))}</div>
   <div class="kpi"><b>best priced open</b>{html.escape(best_open_s)}</div>
   <div class="kpi"><b>5k+ today / yesterday</b>{html.escape(rec(snap.get("today_record")))} / {html.escape(rec(snap.get("yesterday_record")))}</div>
@@ -787,6 +847,15 @@ def render_text(snap: dict[str, Any]) -> str:
 
     gate = snap.get("live_test") or {}
     gate_flag = "READY (still paper)" if gate.get("ready") else "not ready"
+    clv = snap.get("follow_clv") or {}
+    if clv.get("n"):
+        avg = clv.get("avg_clv_pct")
+        clv_line = (
+            f"taker CLV vs close: avg {avg:+.2f} pts  "
+            f"beat {clv.get('beat_close', 0)} / lost {clv.get('lost_close', 0)}  (n={clv.get('n', 0)})"
+        )
+    else:
+        clv_line = "taker CLV vs close: no closes stamped yet"
     lines = [
         f"sxbot board  {snap.get('generated_at')}",
         rec(snap.get("best_priced"), f"follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}", books=True),
@@ -795,6 +864,7 @@ def render_text(snap: dict[str, Any]) -> str:
         rec(snap.get("follow_record"), "taker bot unique (sxbot run)", books=True),
         rec(snap.get("mm_record"), "maker bot unique (sxbot mm)", books=True),
         rec(snap.get("record"), "combined unique (gate only)", books=True),
+        clv_line,
         (
             f"live-test gate: {gate.get('settled', 0)}/{gate.get('target', LIVE_TEST_TRADES)} unique settled  "
             f"follow {gate.get('follow_settled', 0)} · MM {gate.get('mm_settled', 0)}  · {gate_flag}"

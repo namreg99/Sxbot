@@ -67,6 +67,7 @@ class Settings:
     paper_log: str
     flow_log: str
     min_steam_hits: int
+    closes_log: str = "sxbot-closes.jsonl"
     user_agent: str = "sxbot/0.1"
     watch_live: bool = True
     book_source: str = "auto"
@@ -145,6 +146,7 @@ class Settings:
             enable_join_maker=_bool("SX_ENABLE_JOIN_MAKER", True),
             paper_log=os.getenv("SX_PAPER_LOG", "sxbot-paper.jsonl"),
             flow_log=os.getenv("SX_FLOW_LOG", "sxbot-flow.jsonl"),
+            closes_log=os.getenv("SX_CLOSES_LOG", "sxbot-closes.jsonl"),
             min_steam_hits=int(os.getenv("SX_MIN_STEAM_HITS", "2")),
             watch_live=_bool("SX_WATCH_LIVE", True),
             book_source=os.getenv("SX_BOOK_SOURCE", "auto").strip().lower() or "auto",

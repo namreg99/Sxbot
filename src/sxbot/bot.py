@@ -47,6 +47,10 @@ class Bot:
         self._labeled = labeled_addresses(settings)
         self._quotes_by_market: dict[str, MarketQuotes] = {}
         self._takers_by_market: dict[str, dict[str, tuple[str, ...]]] = {}
+        # CLV: last pregame mid per market with a paper position, flushed to
+        # the closes log at kickoff so every card can be graded vs the close.
+        self._pregame_mid: dict[str, tuple[float, int]] = {}
+        self._closed: set[str] = self._hydrate_closes()
         self.risk.hydrate(load_follow_paper(settings.paper_log))
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
@@ -201,6 +205,7 @@ class Bot:
         markets = self.qualifying_markets()
         tape = self.pull_tape(markets)
         for market, view in self.scan_many(markets):
+            self._track_close(market, view)
             prev, report = self.classify_row(market, view, tape)
             if prev is None and report is None:
                 continue
@@ -316,6 +321,60 @@ class Bot:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
+
+    def _hydrate_closes(self) -> set[str]:
+        path = Path(self.settings.closes_log)
+        if not path.exists():
+            return set()
+        closed: set[str] = set()
+        for line in path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            market = str(row.get("market") or "")
+            if market:
+                closed.add(market)
+        return closed
+
+    def _track_close(self, market: Market, view: BookView, *, now: int | None = None) -> None:
+        """Stamp the last pregame mid at kickoff — the closing line for CLV.
+
+        Only markets we actually papered get a close row. CLV = did our price
+        beat the close; it converges on real edge much faster than W-L.
+        """
+        market_hash = market.market_hash
+        if market_hash in self._closed:
+            return
+        ours = any(hash_ == market_hash for hash_, _ in self.risk.joined_sides)
+        if not ours:
+            return
+        now = int(now if now is not None else time.time())
+        live = bool(market.game_time and market.game_time <= now)
+        if not live:
+            if view.mid_one is not None:
+                self._pregame_mid[market_hash] = (to_percent(view.mid_one), market.game_time)
+            return
+        held = self._pregame_mid.pop(market_hash, None)
+        if held is None:
+            if view.mid_one is None:
+                return
+            held = (to_percent(view.mid_one), market.game_time)
+        close_pct, game_time = held
+        self._closed.add(market_hash)
+        path = Path(self.settings.closes_log)
+        record = {
+            "ts": time.time(),
+            "action": "close",
+            "market": market_hash,
+            "label": market.label,
+            "close_mid_pct": close_pct,
+            "game_time": game_time,
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+        log.info("close stamped %s mid=%.3f%%", market.label, close_pct)
 
     def _maybe_heartbeat(self) -> None:
         if self.settings.dry_run:
