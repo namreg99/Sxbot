@@ -94,6 +94,65 @@ def test_mixed_style_skips_tob_lag_unless_enabled() -> None:
     signals = _signals(prev, curr, follow_style="mixed", join_tob_lag=True)
     assert signals
     assert signals[0].action is Action.JOIN_MAKER
+    assert signals[0].motive == "tob_lag"
+
+
+def test_join_style_skips_tob_lag_unless_enabled() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="2")
+    assert _signals(prev, curr, follow_style="join") == []
+    signals = _signals(prev, curr, follow_style="join", join_tob_lag=True)
+    assert len(signals) == 1
+    assert signals[0].action is Action.JOIN_MAKER
+    assert signals[0].motive == "tob_lag"
+
+
+def test_tob_lag_join_skips_dogs() -> None:
+    """Parked depth on 3.30 tennis dogs was −14% unique. Cap is 2.20."""
+    prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
+    curr = make_book(o1=((30.0, 1), (35.0, 20)), o2=((69.0, 10),), version="2")
+    market = make_market(
+        type=52,
+        sport_id=6,
+        sport_label="Tennis",
+        league_id=2,
+        league_label="ATP",
+        outcome_one="Player A",
+        outcome_two="Player B",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(join_tob_lag=True),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def test_tob_lag_join_takes_soccer_shorts() -> None:
+    prev = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="1")
+    curr = make_book(o1=((65.0, 1), (70.0, 20)), o2=((34.0, 10),), version="2")
+    market = make_market(
+        type=1,
+        sport_id=5,
+        sport_label="Soccer",
+        league_id=1,
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(join_tob_lag=True),
+        OddsLadder(125),
+    )
+    assert len(signals) == 1
+    assert signals[0].action is Action.JOIN_MAKER
+    assert signals[0].style == "soccer"
+    assert signals[0].motive == "tob_lag"
 
 
 def test_skips_totals_even_on_steam() -> None:

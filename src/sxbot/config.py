@@ -81,6 +81,10 @@ class Settings:
     skip_totals: bool = True
     skip_not_tie: bool = True
     join_tob_lag: bool = False
+    # Backtest (453 unique pregame tob_lag, entry at mid): <=2.20 was +6.3%,
+    # dogs 2.20-3.50 were -14.3%. Parked depth on favorites is real; on dogs
+    # it is a trap. Joins on this motive skip anything longer than this.
+    tob_lag_max_decimal: float = 2.20
     one_side_per_market: bool = True
     one_side_per_event: bool = True
     paper_slot_seconds: float = 7200.0
@@ -159,7 +163,11 @@ class Settings:
             mimic_log=os.getenv("SX_MIMIC_LOG", "sxbot-mimic.jsonl"),
             skip_totals=_bool("SX_SKIP_TOTALS", True),
             skip_not_tie=_bool("SX_SKIP_NOT_TIE", True),
-            join_tob_lag=_bool("SX_JOIN_TOB_LAG", False),
+            # Product default on: parked-depth joins on shorts/pick'em. Tests
+            # that construct Settings() keep the dataclass False unless they
+            # pass join_tob_lag=True.
+            join_tob_lag=_bool("SX_JOIN_TOB_LAG", True),
+            tob_lag_max_decimal=float(os.getenv("SX_TOB_LAG_MAX_DECIMAL", "2.20")),
             one_side_per_market=_bool("SX_ONE_SIDE_PER_MARKET", True),
             one_side_per_event=_bool("SX_ONE_SIDE_PER_EVENT", True),
             paper_slot_seconds=float(os.getenv("SX_PAPER_SLOT_SECONDS", "7200")),

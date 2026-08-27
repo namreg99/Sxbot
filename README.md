@@ -15,7 +15,8 @@ Every couple of seconds the bot looks at the live prices and asks:
 1. Did the makers just move both sides the same way? → sit on that side, one tick worse than them (so we are not jumping in front).
 2. Did they pull money off one side and pile it on the other? → same thing, join the heavy side.
 3. Is leftover junk sitting at a stale price? → take it, because that *is* betting with the makers.
-4. Did a random bettor just smash the top of the book? → ignore it.
+4. Is the **body** of the book (parked depth) ahead of the displayed best, on a short or pick’em (decimal ≤2.20)? → join the body. Dogs on this signal are a trap; they are skipped.
+5. Did a random bettor just smash the top of the book? → ignore it.
 
 In **paper mode** (the default) it writes "I would have bet $5 on X at 49%" to a file. It does **not** send an order and it does **not** spend money. Real orders only happen if you later turn dry-run off and add keys.
 
@@ -141,6 +142,8 @@ See `.env.example`. The knobs that matter:
 | `SX_KELLY_MAX_FRAC` | Never bet more than this share of bankroll on one take (default 5%) |
 | `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
 | `SX_FOLLOW_STYLE` | `join` (sit behind makers, same team), `take` (hit now, same team as steam), `mixed` |
+| `SX_JOIN_TOB_LAG` | Join parked-depth leads (default **on** in `sxbot run`). Dogs over `SX_TOB_LAG_MAX_DECIMAL` are skipped |
+| `SX_TOB_LAG_MAX_DECIMAL` | Cap for tob-lag joins (default 2.20). Tape: ≤2.20 +6.3% unique ROI; 2.20–3.50 −14% |
 | `SX_MM_TWO_SIDED` | `false` (default): ghost-quote the heavy side only. `true`: rest both sides for a spread |
 | `SX_MM_MIN_ROI` | Skip a ghost quote if the fitted cell shrinks below this (default 0) |
 | `SX_MM_MODEL_PATH` | Fill-ROI table from `sxbot fit` (default `sxbot-maker-model.json`) |
@@ -157,7 +160,7 @@ See `.env.example`. The knobs that matter:
 | --- | --- | --- |
 | Both sides of the book reprice the same way, often with **no** tape print | Makers moved fair value (steam) | Join that side |
 | Resting size pulled off one outcome and added to the other | Makers want to be long that outcome | Join that side |
-| Depth-weighted mid leads the displayed mid | The body of the book is informed; the top is leftover or a probe | Join the body |
+| Depth-weighted mid leads the displayed mid | The body of the book is informed; the top is leftover or a probe | Join the body if decimal ≤ `SX_TOB_LAG_MAX_DECIMAL` (default 2.20). Off for dogs. |
 | Size disappears at the best **and** the tape printed | A taker lifted offers | Ignore — do not copy takers |
 | Leftover quotes sitting through the new mid (crossed book) | Stale size after a steam | Take it — that *is* betting with the makers |
 
@@ -193,6 +196,8 @@ Skip soccer Team/Team, NFL, basketball, totals, and pick’em. Hold the posted s
 Two-sided making (rest both outcomes, lock an overround if both fill, plus maker rewards while unmatched) is the spread/rewards shape. It is **not** the better extract path in the labeled sample: HedgeHog was ~70% maker and still red on fills, and only about a third of their maker markets filled both ways. `SX_MM_TWO_SIDED=true` restores that both-sides loop.
 
 Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Pull at kickoff.
+
+**Fair-line research (not wired).** Paper MM assumes a tape fill at our ghost price. Live making needs a fill *and* an edge vs a true number. SX's public book is not that number. The next research step is an external consensus / Pinnacle (or equivalent) fair line so we can shade just enough to get hit while staying +EV. That is background work; `sxbot mm` stays paused until that exists. Do not mix this with the taker bot's unique card.
 
 ## Paper books: $5 flat and ⅝ Kelly
 
