@@ -4,7 +4,7 @@ SX_FOLLOW_STYLE:
 - join       — rest behind makers (default). Still take leftover crossed quotes.
 - take       — hit the informed side now (pay the spread, same team as the steam).
 - mixed      — take on strong steam/rotation; otherwise join.
-- take_first — hit the other side to get the same team whenever that quote exists; join only if we cannot take.
+- take_first — hit the other side to get the same team. Do not sit as a maker.
 
 The follow-bot (`sxbot run`) uses maker bias to bet *with* the makers.
 Filling the heavy quotes (the other team) is not this strategy.
@@ -194,7 +194,7 @@ def evaluate(
                 signals.append(signal)
                 return signals
 
-    if follow == "take":
+    if follow in {"take", "take_first"}:
         return signals
 
     join_motives = {Motive.MAKER_STEAM, Motive.SIZE_ROTATION}

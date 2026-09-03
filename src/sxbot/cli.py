@@ -141,8 +141,8 @@ def main(argv: list[str] | None = None) -> int:
             enable_take_stale=True,
         )
         print(
-            "LIVE take_first: same unique-follow team, but HIT the other side (IOC). "
-            "Those takes do not sit on SX as offers. Resting offers are join fallback only.",
+            "LIVE take_first: same unique-follow team, HIT the other side (IOC). "
+            "Takes do not sit on SX as offers. This mode does not post resting joins.",
             flush=True,
         )
     if args.cmd == "summary":

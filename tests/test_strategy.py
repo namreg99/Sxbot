@@ -97,13 +97,10 @@ def test_take_first_takes_steam_instead_of_joining() -> None:
     assert signals[0].maker_odds == from_percent(54.0)
 
 
-def test_take_first_joins_when_take_is_off() -> None:
+def test_take_first_does_not_join_when_take_is_off() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
-    signals = _signals(prev, curr, follow_style="take_first", enable_take_stale=False)
-    assert len(signals) == 1
-    assert signals[0].action is Action.JOIN_MAKER
-    assert signals[0].maker_odds == from_percent(52.875)
+    assert _signals(prev, curr, follow_style="take_first", enable_take_stale=False) == []
 
 
 def test_take_first_keeps_tennis_short_when_take_pays_inside_1_12() -> None:
