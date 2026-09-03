@@ -9,6 +9,7 @@ from typing import Any
 
 from sxbot.config import Settings
 from sxbot.journal import live_log_for, paper_log_for
+from sxbot.fills import live_entry_filled, order_ids
 from sxbot.kelly import UNIQUE_BANKROLL_USDC, UNIQUE_FLAT_USDC, UNIQUE_KELLY_FRACTION, tracker_kelly_usdc
 from sxbot.models import Action, ExchangeMeta, Signal
 from sxbot.units import to_percent, to_usdc
@@ -89,6 +90,7 @@ class Executor:
                 signal.reason,
             )
             self._append(record, signal)
+            record["live_filled"] = True
             return record
 
         if signal.action is Action.MM_FILL:
@@ -118,8 +120,22 @@ class Executor:
             raise
         record["result"] = result
         record["clientOrderId"] = order.get("clientOrderId")
+        filled = live_entry_filled(result, stake)
+        record["live_filled"] = filled
+        oids = order_ids(result)
+        if oids:
+            record["order_ids"] = oids
         tif = "GTC offer" if signal.action is Action.JOIN_MAKER else "IOC take (will not rest as an offer)"
-        log.info("LIVE %s %s [%s] -> %s", signal.action.value, signal.market.label, tif, result)
+        if filled:
+            log.info("LIVE %s %s [%s] FILLED -> %s", signal.action.value, signal.market.label, tif, result)
+        else:
+            log.info(
+                "LIVE %s %s [%s] NO FILL (unique side kept, will retry) -> %s",
+                signal.action.value,
+                signal.market.label,
+                tif,
+                result,
+            )
         self._append(record, signal)
         return record
 

@@ -13,7 +13,8 @@ from typing import Callable
 from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
-from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, quote_family
+from sxbot.fills import order_ids
+from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, longshot_skip_reason, quote_family, quote_style
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
 from sxbot.kelly import TAKE_ACTIONS
 from sxbot.journal import load_follow_live, load_follow_paper
@@ -22,8 +23,8 @@ from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
 from sxbot.risk import RiskGate
 from sxbot.rollout import uses_v2_books
-from sxbot.strategy import evaluate
-from sxbot.units import OddsLadder, to_percent
+from sxbot.strategy import _take_against, evaluate
+from sxbot.units import ODDS_SCALE, OddsLadder, to_percent
 from sxbot.v2 import books_from_v2_orders, public_trades_from_v2
 from sxbot.wallets import labeled_addresses
 
@@ -51,9 +52,9 @@ class Bot:
         # the closes log at kickoff so every card can be graded vs the close.
         self._pregame_mid: dict[str, tuple[float, int]] = {}
         self._closed: set[str] = self._hydrate_closes()
-        if settings.dry_run:
-            self.risk.hydrate(load_follow_paper(settings.paper_log))
-        else:
+        paper = load_follow_paper(settings.paper_log)
+        self.risk.hydrate(paper)
+        if not settings.dry_run:
             self.risk.hydrate(load_follow_live(settings.paper_log))
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
@@ -230,37 +231,90 @@ class Bot:
                 continue
             if prev is None or report is None:
                 continue
+            executed += self._ensure_live_entry(market, view)
+            if self.risk.chosen_side(market.market_hash):
+                continue
             for signal in evaluate(
                 market, prev, view, self.settings, self.ladder, report=report
             ):
-                stake = self.risk.stake_for(signal)
-                if stake is None:
-                    log.info(
-                        "skip %s %s: no Kelly edge vs fair %.3f%%",
-                        signal.action.value,
-                        market.label,
-                        to_percent(signal.fair_odds) if signal.fair_odds else 0.0,
-                    )
-                    continue
-                stake = max(stake, self.meta.min_order) if signal.action not in TAKE_ACTIONS else stake
-                if signal.action in TAKE_ACTIONS and stake < self.meta.min_order:
-                    log.info("skip %s %s: Kelly size below min order", signal.action.value, market.label)
-                    continue
-                reason = self.risk.allow(signal, stake=stake)
-                if reason:
-                    log.info("skip %s %s: %s", signal.action.value, market.label, reason)
-                    continue
-                extra = {}
-                if signal.action in TAKE_ACTIONS:
-                    extra = {
-                        "fair_pct": to_percent(signal.fair_odds) if signal.fair_odds else None,
-                        "kelly_fraction": self.settings.kelly_fraction,
-                        "bankroll_usdc": self.settings.bankroll_usdc,
-                    }
-                self.executor.execute(signal, stake, extra=extra or None)
-                self.risk.record(signal, stake)
-                executed += 1
+                executed += self._place_unique(signal)
         return executed
+
+    def _ensure_live_entry(self, market: Market, view: BookView) -> int:
+        """Unique already picked a side: take until SX actually fills."""
+        if self.settings.dry_run:
+            return 0
+        side = self.risk.needs_live_entry(market.market_hash)
+        if side is None:
+            return 0
+        price = _take_against(view, side)
+        if price is None or longshot_skip_reason(price, self.settings):
+            log.info("unique chose %s %s but nothing to take yet", market.label, side.value)
+            return 0
+        style = quote_style(market, view.best(side) or price, self.settings) or quote_style(
+            market, price, self.settings
+        )
+        if not style:
+            return 0
+        fair = 0
+        if view.mid_one is not None:
+            fair = view.mid_one if side is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
+        signal = Signal(
+            market=market,
+            side=side,
+            action=Action.TAKE_FLOW,
+            maker_odds=price,
+            reason="retry unique — chosen side has no live fill",
+            mid_move_bps=0,
+            imbalance=view.imbalance,
+            confidence=1.0,
+            style=style,
+            fair_odds=fair,
+            motive="retry_unfilled",
+        )
+        pending = self.risk.pending_order_ids.get(market.market_hash) or []
+        if pending:
+            try:
+                self.client.cancel_orders(pending)
+                log.info("cancelled unfilled offer before retry take %s", market.label)
+            except Exception:
+                log.exception("cancel unfilled offer failed %s", market.label)
+        return self._place_unique(signal)
+
+    def _place_unique(self, signal: Signal) -> int:
+        stake = self.risk.stake_for(signal)
+        if stake is None:
+            log.info(
+                "skip %s %s: no Kelly edge vs fair %.3f%%",
+                signal.action.value,
+                signal.market.label,
+                to_percent(signal.fair_odds) if signal.fair_odds else 0.0,
+            )
+            return 0
+        stake = max(stake, self.meta.min_order) if signal.action not in TAKE_ACTIONS else stake
+        if signal.action in TAKE_ACTIONS and stake < self.meta.min_order:
+            log.info("skip %s %s: Kelly size below min order", signal.action.value, signal.market.label)
+            return 0
+        reason = self.risk.allow(signal, stake=stake)
+        if reason:
+            log.info("skip %s %s: %s", signal.action.value, signal.market.label, reason)
+            return 0
+        extra = {}
+        if signal.action in TAKE_ACTIONS:
+            extra = {
+                "fair_pct": to_percent(signal.fair_odds) if signal.fair_odds else None,
+                "kelly_fraction": self.settings.kelly_fraction,
+                "bankroll_usdc": self.settings.bankroll_usdc,
+            }
+        record = self.executor.execute(signal, stake, extra=extra or None)
+        self.risk.mark_chosen(signal)
+        if self.settings.dry_run or record.get("live_filled"):
+            self.risk.record(signal, stake)
+            return 1
+        oids = order_ids(record.get("result"))
+        if oids:
+            self.risk.pending_order_ids[signal.market.market_hash] = oids
+        return 1
 
     def run(self) -> None:
         log.info(

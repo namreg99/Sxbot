@@ -54,7 +54,48 @@ def test_does_not_restack_a_take_on_the_same_side() -> None:
     assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x1")) == "already on this side"
 
 
-def test_hydrate_remembers_paper_joins_without_reloading_dollars() -> None:
+def test_hydrate_live_rested_allows_retry_take() -> None:
+    gate = RiskGate(make_settings(dry_run=False, max_exposure_usdc=1000, max_per_market_usdc=25))
+    gate.hydrate(
+        [
+            {
+                "action": "join_maker",
+                "market": "0x1",
+                "side": "outcome_one",
+                "dry_run": False,
+                "live_filled": False,
+                "result": {
+                    "orders": [
+                        {
+                            "orderId": "0xdead",
+                            "outcome": {"state": "RESTED", "remainingAmount": "1000000"},
+                        }
+                    ]
+                },
+            }
+        ]
+    )
+    assert gate.needs_live_entry("0x1") is Side.OUTCOME_ONE
+    assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x1")) is None
+    opposite = replace(_signal(Action.TAKE_FLOW, hash_="0x1"), side=Side.OUTCOME_TWO)
+    assert gate.allow(opposite) == "already in this market"
+
+
+def test_hydrate_live_fill_blocks_restack() -> None:
+    gate = RiskGate(make_settings(dry_run=False, max_exposure_usdc=1000, max_per_market_usdc=25))
+    gate.hydrate(
+        [
+            {
+                "action": "take_flow",
+                "market": "0x1",
+                "side": "outcome_one",
+                "dry_run": False,
+                "live_filled": True,
+            }
+        ]
+    )
+    assert gate.needs_live_entry("0x1") is None
+    assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x1")) == "already on this side"
     gate = RiskGate(make_settings(max_exposure_usdc=1000, max_per_market_usdc=25))
     gate.hydrate(
         [
