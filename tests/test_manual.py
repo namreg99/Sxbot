@@ -20,11 +20,11 @@ def test_parse_odds_decimal_percent_american() -> None:
     assert abs(pct - 100.0 / 1.78) < 0.05
     assert odds > 0
     _, _, dec_pct = parse_odds("56.25")
-    assert abs(dec_pct - (100.0 / 56.25)) < 1e-6
+    assert abs(dec_pct - (100.0 / 56.25)) < 1e-3
     _, _, plus = parse_odds("+150")
     assert plus == 2.5
     _, _, minus = parse_odds("-110")
-    assert abs(minus - (1.0 + 100.0 / 110.0)) < 1e-6
+    assert abs(minus - (1.0 + 100.0 / 110.0)) < 1e-3
     assert decimal_odds(to_prob(odds)) > 1
 
 

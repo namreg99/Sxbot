@@ -316,6 +316,13 @@ def _attach_books(view: dict[str, Any], row: dict[str, Any], settings: Settings)
     result = str(view.get("result") or "")
     actual_stake = float(view.get("stake_usdc") or 0)
     actual_pnl = view.get("pnl_usdc")
+    if str(row.get("action") or "") == ACTION_MANUAL or str(row.get("source") or "") == "manual":
+        view["flat_stake_usdc"] = actual_stake
+        view["flat_pnl_usdc"] = actual_pnl
+        view["kelly_stake_usdc"] = None
+        view["kelly_pnl_usdc"] = None
+        view["fair_pct"] = row.get("fair_pct")
+        return view
     flat = float(getattr(settings, "stake_usdc", 5) or 5)
     stamped_flat = row.get("flat_stake_usdc")
     if stamped_flat not in (None, ""):

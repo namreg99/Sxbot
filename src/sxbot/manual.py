@@ -68,10 +68,14 @@ def name_hit(needle: str, haystack: str) -> bool:
     n, h = norm_name(needle), norm_name(haystack)
     if not n or not h:
         return False
-    if n == h or n in h or h in n:
+    if n == h or n in h:
+        return True
+    # "Barbora Krejcikova" vs market last name only. Skip 1–3 letter
+    # fragments so "Nobody" does not match "B".
+    if len(h) >= 4 and h in n:
         return True
     last = n.split()[-1]
-    return bool(last) and last in h.split()
+    return len(last) >= 4 and last in h.split()
 
 
 def side_for_picked(picked: str, outcome_one: str, outcome_two: str) -> str | None:
