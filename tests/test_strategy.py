@@ -87,6 +87,26 @@ def test_take_style_hits_steam_instead_of_joining() -> None:
     assert signals[0].fair_odds > 0
 
 
+def test_take_first_joins_when_take_pays_up() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    signals = _signals(prev, curr, follow_style="take_first")
+    assert len(signals) == 1
+    assert signals[0].action is Action.JOIN_MAKER
+    assert signals[0].side is Side.OUTCOME_ONE
+    assert signals[0].maker_odds == from_percent(52.875)
+
+
+def test_take_first_takes_when_touch_or_better() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((47.0, 10),), version="2")
+    signals = _signals(prev, curr, follow_style="take_first")
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].side is Side.OUTCOME_ONE
+    assert signals[0].maker_odds == from_percent(53.0)
+
+
 def test_mixed_style_skips_tob_lag_unless_enabled() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="2")

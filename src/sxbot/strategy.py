@@ -1,9 +1,10 @@
 """Turn classified flow into join (maker) and/or take (taker) actions.
 
 SX_FOLLOW_STYLE:
-- join  — rest behind makers (default). Still take leftover crossed quotes.
-- take  — hit the informed side now (pay the spread, same team as the steam).
-- mixed — take on strong steam/rotation; otherwise join.
+- join       — rest behind makers (default). Still take leftover crossed quotes.
+- take       — hit the informed side now (pay the spread, same team as the steam).
+- mixed      — take on strong steam/rotation; otherwise join.
+- take_first — take if we get the same team at the makers' touch or better; otherwise join.
 
 The follow-bot (`sxbot run`) uses maker bias to bet *with* the makers.
 Filling the heavy quotes (the other team) is not this strategy.
@@ -43,6 +44,13 @@ def _take_against(view: BookView, side: Side) -> int | None:
     if opposite is None:
         return None
     return taker_odds(opposite)
+
+
+def _take_eq_or_better(take_price: int, our_best: int | None) -> bool:
+    """Same team. Take if we get the touch or longer; else join (do not pay up)."""
+    if our_best is None:
+        return True
+    return take_price <= our_best
 
 
 def _signal(
@@ -139,6 +147,35 @@ def evaluate(
             if signal is not None:
                 signals.append(signal)
                 return signals
+
+    take_first_motives = {Motive.MAKER_STEAM, Motive.SIZE_ROTATION}
+    if settings.join_tob_lag:
+        take_first_motives.add(Motive.TOB_LAG)
+
+    if (
+        follow == "take_first"
+        and settings.enable_take_stale
+        and report.motive in take_first_motives
+    ):
+        take_price = _take_against(curr, report.side)
+        our_best = curr.best(report.side)
+        if take_price is not None and _take_eq_or_better(take_price, our_best):
+            skip_tob_dog = report.motive is Motive.TOB_LAG and not _tob_lag_join_ok(
+                take_price, settings, quote_style(market, take_price, settings)
+            )
+            if not skip_tob_dog:
+                signal = _priced(
+                    market,
+                    report,
+                    curr,
+                    Action.TAKE_FLOW,
+                    take_price,
+                    settings,
+                    crossed=curr.crossed,
+                )
+                if signal is not None:
+                    signals.append(signal)
+                    return signals
 
     take_now = settings.enable_take_stale and report.motive in {
         Motive.MAKER_STEAM,
