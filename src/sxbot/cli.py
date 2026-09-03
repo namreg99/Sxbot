@@ -134,7 +134,17 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run" and args.live:
         from dataclasses import replace
 
-        settings = replace(settings, dry_run=False)
+        settings = replace(
+            settings,
+            dry_run=False,
+            follow_style="take_first",
+            enable_take_stale=True,
+        )
+        print(
+            "LIVE take_first: same unique-follow team, but HIT the other side (IOC). "
+            "Those takes do not sit on SX as offers. Resting offers are join fallback only.",
+            flush=True,
+        )
     if args.cmd == "summary":
         print_summary(settings.flow_log, settings.paper_log)
         mimic_rows = load_jsonl(settings.mimic_log)

@@ -118,7 +118,8 @@ class Executor:
             raise
         record["result"] = result
         record["clientOrderId"] = order.get("clientOrderId")
-        log.info("LIVE %s %s -> %s", signal.action.value, signal.market.label, result)
+        tif = "GTC offer" if signal.action is Action.JOIN_MAKER else "IOC take (will not rest as an offer)"
+        log.info("LIVE %s %s [%s] -> %s", signal.action.value, signal.market.label, tif, result)
         self._append(record, signal)
         return record
 
