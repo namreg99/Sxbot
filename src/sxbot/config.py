@@ -18,7 +18,11 @@ def _bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    # Windows Notepad / bad merges sometimes leave NUL bytes in .env values.
+    raw = raw.replace("\x00", "").strip()
+    if not raw:
+        return default
+    return raw.lower() in {"1", "true", "yes", "on"}
 
 
 def _addrs(name: str, default: tuple[str, ...] = ()) -> tuple[str, ...]:

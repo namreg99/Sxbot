@@ -48,11 +48,19 @@ def main(argv: list[str] | None = None) -> int:
         "scoreboard",
         help="Grade flow signals (not paper orders) against real settled outcomes",
     )
-    run = sub.add_parser("run", help="Paper or live trading loop (dry-run unless SX_DRY_RUN=false)")
+    run = sub.add_parser(
+        "run",
+        help="Paper or live trading loop (dry-run unless SX_DRY_RUN=false or --live)",
+    )
     run.add_argument("--once", action="store_true", help="Two polls then exit")
+    run.add_argument(
+        "--live",
+        action="store_true",
+        help="Place real orders (overrides SX_DRY_RUN). Needs SX_API_KEY + SX_PRIVATE_KEY.",
+    )
     live_ping = sub.add_parser(
         "live-ping",
-        help="Post one signed 1 USDC FOK (far from the touch) and print SX's reply",
+        help="Post one signed 1 USDC FOK at the touch and print SX's reply",
     )
     live_ping.add_argument(
         "--yes",
@@ -123,6 +131,10 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     settings = Settings.load()
+    if args.cmd == "run" and args.live:
+        from dataclasses import replace
+
+        settings = replace(settings, dry_run=False)
     if args.cmd == "summary":
         print_summary(settings.flow_log, settings.paper_log)
         mimic_rows = load_jsonl(settings.mimic_log)
