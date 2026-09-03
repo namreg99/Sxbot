@@ -597,3 +597,69 @@ def test_take_flow_is_the_same_team_as_makers(tmp_path) -> None:
     assert "TAKE $5 Cincinnati Reds" in line
     assert "same side as makers" in line
     assert "TAKE $5 San Francisco Giants" not in line
+
+
+def test_bot_you_together_stay_separate(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    manual = tmp_path / "sxbot-manual.jsonl"
+    odds = from_percent(71.875)
+    paper.write_text(
+        (
+            '{"ts": 10, "action": "join_maker", "market": "0xabc", "side": "outcome_one",'
+            f' "label": "Uchijima / Hercog", "league": "WTA", "odds": "{odds}",'
+            ' "odds_pct": 71.875, "stake": "5000000", "stake_usdc": 5,'
+            ' "outcome_one": "Uchijima", "outcome_two": "Hercog", "style": "tennis_short",'
+            ' "motive": "maker_steam", "game_time": 100}\n'
+        ),
+        encoding="utf-8",
+    )
+    you_odds = from_percent(50.0)
+    manual.write_text(
+        (
+            '{"ts": 20, "ticket_id": "abc123", "source": "manual", "action": "manual",'
+            f' "style": "manual", "side": "outcome_two", "market": "0xabc",'
+            f' "label": "Uchijima / Hercog", "league": "WTA", "picked": "Hercog",'
+            f' "outcome_one": "Uchijima", "outcome_two": "Hercog", "odds": "{you_odds}",'
+            ' "odds_pct": 50.0, "decimal": 2.0, "stake": "25000000", "stake_usdc": 25,'
+            ' "book": "pinnacle", "motive": "manual", "game_time": 100}\n'
+        ),
+        encoding="utf-8",
+    )
+    client = FakeClient(
+        [
+            {
+                "marketHash": "0xabc",
+                "outcomeOneName": "Uchijima",
+                "outcomeTwoName": "Hercog",
+                "leagueLabel": "WTA",
+                "outcome": 1,
+                "gameTime": 100,
+            }
+        ]
+    )
+    snap = build_snapshot(
+        client,
+        make_settings(paper_log=str(paper), manual_log=str(manual)),
+        tape_rows=[],
+    )
+    assert snap["follow_record"]["wins"] == 1
+    assert snap["follow_record"]["losses"] == 0
+    assert snap["you_record"]["wins"] == 0
+    assert snap["you_record"]["losses"] == 1
+    assert snap["you_record"]["pnl_usdc"] == -25.0
+    assert snap["together_record"]["wins"] == 1
+    assert snap["together_record"]["losses"] == 1
+    assert snap["bot_book"]["wins"] == 1
+    assert snap["you_book"]["losses"] == 1
+    assert snap["together_book"]["n"] == 2
+    assert snap["you_tickets"][0]["picked"] == "Hercog"
+    line = make_take_line(snap["you_tickets"][0])
+    assert "YOU $25 Hercog @2.0" in line
+    assert "pinnacle" in line
+    page = render_html(snap)
+    assert "your book" in page
+    assert "together (bot unique + you)" in page
+    assert "Hercog" in page
+    text = render_text(snap)
+    assert "your book (logged tickets)" in text
+    assert "together (bot unique + you)" in text

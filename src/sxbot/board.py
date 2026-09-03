@@ -19,12 +19,20 @@ from urllib.parse import urlparse
 import httpx
 
 from sxbot.api import SxClient, index_markets, lookup_market
+from sxbot.books import (
+    bettor_card,
+    format_card,
+    format_card_oneline,
+    format_dashboard,
+    telegram_books_due,
+)
 from sxbot.config import Settings
 from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
 from sxbot.grade import _picked_name, grade_row, opposite_side
 from sxbot.journal import load_all_live, load_all_paper, load_jsonl
 from sxbot.kelly import shadow_kelly_from_row
+from sxbot.manual import ACTION_MANUAL, load_manual, stamp_settled_view
 from sxbot.units import complement_decimal, decimal_odds, to_percent, to_prob
 from sxbot.wallets import CANDIDATE_WALLETS, KNOWN_WALLETS, labeled_addresses
 
@@ -314,6 +322,13 @@ def _attach_books(view: dict[str, Any], row: dict[str, Any], settings: Settings)
     result = str(view.get("result") or "")
     actual_stake = float(view.get("stake_usdc") or 0)
     actual_pnl = view.get("pnl_usdc")
+    if str(row.get("action") or "") == ACTION_MANUAL or str(row.get("source") or "") == "manual":
+        view["flat_stake_usdc"] = actual_stake
+        view["flat_pnl_usdc"] = actual_pnl
+        view["kelly_stake_usdc"] = None
+        view["kelly_pnl_usdc"] = None
+        view["fair_pct"] = row.get("fair_pct")
+        return view
     flat = float(getattr(settings, "stake_usdc", 5) or 5)
     stamped_flat = row.get("flat_stake_usdc")
     if stamped_flat not in (None, ""):
@@ -343,6 +358,8 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
         verb = "take"
     elif action == "mm_fill":
         verb = "fill"
+    elif action == ACTION_MANUAL:
+        verb = "you"
     elif action == "cancel":
         verb = "cancel"
     else:
@@ -379,8 +396,12 @@ def _paper_view(bet: Any, row: dict[str, Any], settings: Settings) -> dict[str, 
         "imbalance": row.get("imbalance"),
         "with_makers": is_maker_ev(row),
         "best_priced": is_best_priced({"decimal": decimal}),
+        "book": str(row.get("book") or ""),
+        "ticket_id": str(row.get("ticket_id") or ""),
+        "source": str(row.get("source") or row.get("style") or ""),
     }
-    return _attach_books(view, row, settings)
+    stamped = stamp_settled_view(view, row)
+    return _attach_books(stamped, row, settings)
 
 
 def _win_lose_dollars(decimal: float | None, stake: float) -> str:
@@ -408,6 +429,13 @@ def make_take_line(b: dict[str, Any]) -> str:
             f"TAKE ${stake:g} {picked} @{decimal}"
             f"{_win_lose_dollars(decimal, stake)}"
             f"  (stale leftover — same team as the steam)"
+        )
+    if action == ACTION_MANUAL:
+        book = str(b.get("book") or "you")
+        return (
+            f"YOU ${stake:g} {picked} @{decimal}"
+            f"{_win_lose_dollars(decimal, stake)}"
+            f"  ({book})"
         )
     fill_note = ""
     if fill_when and fill_dec:
@@ -548,13 +576,17 @@ def build_snapshot(
     )
     paper_rows = load_all_paper(settings.paper_log)
     live_rows = load_all_live(settings.paper_log)
+    manual_rows = load_manual(getattr(settings, "manual_log", "sxbot-manual.jsonl"))
     paper_hashes = list(
         dict.fromkeys(str(r.get("market") or "") for r in paper_rows if r.get("market"))
     )
     live_hashes = list(
         dict.fromkeys(str(r.get("market") or "") for r in live_rows if r.get("market"))
     )
-    extra_hashes = [h for h in paper_hashes + live_hashes if h not in hashes]
+    manual_hashes = list(
+        dict.fromkeys(str(r.get("market") or "") for r in manual_rows if r.get("market"))
+    )
+    extra_hashes = [h for h in paper_hashes + live_hashes + manual_hashes if h not in hashes]
     found = client.find_markets(hashes + extra_hashes) if (hashes or extra_hashes) else []
     markets = index_markets(found)
 
@@ -595,6 +627,13 @@ def build_snapshot(
     live_life = [_view_row(row) for row in unique_lifetime_rows(live_rows)]
     live_follow = [b for b in live_life if str(b.get("style") or "") != STYLE_MM]
     live_record = paper_record(live_follow)
+    you_bets = [_view_row(row) for row in manual_rows]
+    you_bets.sort(key=lambda b: float(b.get("ts") or 0), reverse=True)
+    you_open = [b for b in you_bets if b.get("result") in {"pending", "missing"}]
+    together_bets = follow_bets + you_bets
+    bot_book = bettor_card(follow_bets)
+    you_book = bettor_card(you_bets)
+    together_book = bettor_card(together_bets)
     return {
         "generated_at": _utc(now_ts),
         "generated_ts": now_ts,
@@ -609,6 +648,13 @@ def build_snapshot(
         "follow_record": follow_record,
         "live_record": live_record,
         "mm_record": mm_record,
+        "you_record": paper_record(you_bets),
+        "together_record": paper_record(together_bets),
+        "bot_book": bot_book,
+        "you_book": you_book,
+        "together_book": together_book,
+        "you_tickets": you_bets,
+        "you_open": you_open,
         "follow_clv": clv_record(follow_bets),
         "best_priced": {
             **paper_record(best_priced),
@@ -704,9 +750,9 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
             )
         return "\n".join(bits)
 
-    def paper_rows(rows: list[dict[str, Any]]) -> str:
+    def paper_rows(rows: list[dict[str, Any]], empty: str = "No paper quotes yet. Leave `sxbot run` going.") -> str:
         if not rows:
-            return "<tr><td colspan='7' class='empty'>No paper quotes yet. Leave `sxbot run` going.</td></tr>"
+            return f"<tr><td colspan='7' class='empty'>{html.escape(empty)}</td></tr>"
         bits: list[str] = []
         for b in rows:
             result = str(b.get("result") or "")
@@ -789,6 +835,9 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
   <div class="kpi"><b>follow maker EV (steam / parked size)</b>{html.escape(rec(snap.get("maker_ev"), books=True))}</div>
   <div class="kpi"><b>follow short + EV</b>{html.escape(rec(snap.get("priced_ev"), books=True))}</div>
   <div class="kpi"><b>taker bot unique (`sxbot run`) $5 / Kelly $25</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
+  <div class="kpi"><b>bot book (run unique)</b>{html.escape(format_card_oneline(snap.get("bot_book")))}</div>
+  <div class="kpi"><b>your book (sxbot bet add)</b>{html.escape(format_card_oneline(snap.get("you_book")))}</div>
+  <div class="kpi"><b>together (bot unique + you)</b>{html.escape(format_card_oneline(snap.get("together_book")))}</div>
   <div class="kpi"><b>live unique $1–$4 (new book)</b>{html.escape(rec(snap.get("live_record"), books=True))}</div>
   <div class="kpi"><b>maker bot unique (`sxbot mm`)</b>{html.escape(rec(snap.get("mm_record"), books=True))}</div>
   <div class="kpi"><b>combined unique (gate only — do not mix ROI)</b>{html.escape(rec(snap.get("record"), books=True))}</div>
@@ -799,6 +848,11 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
   <div class="kpi"><b>by style</b>{style_bits}</div>
 </div>
 {tape_note}
+<h2>Your tickets</h2>
+<table>
+  <thead><tr><th>when</th><th>style</th><th>role</th><th>make / take</th><th>market</th><th>result</th><th>kickoff</th></tr></thead>
+  <tbody>{paper_rows(snap.get("you_tickets") or [], "No tickets yet. `sxbot bet add --picked NAME --odds 1.45 --stake 25`")}</tbody>
+</table>
 <h2>Bot paper feed</h2>
 <table>
   <thead><tr><th>when</th><th>style</th><th>role</th><th>make / take</th><th>market</th><th>result</th><th>kickoff</th></tr></thead>
@@ -870,6 +924,9 @@ def render_text(snap: dict[str, Any]) -> str:
         rec(snap.get("maker_ev"), "follow maker EV", books=True),
         rec(snap.get("priced_ev"), "follow short + EV", books=True),
         rec(snap.get("follow_record"), "taker bot unique $5 / Kelly $25 (sxbot run)", books=True),
+        format_card(snap.get("bot_book"), "bot book (run unique)"),
+        format_card(snap.get("you_book"), "your book (logged tickets)"),
+        format_card(snap.get("together_book"), "together (bot unique + you)"),
         rec(snap.get("live_record"), "live unique $1-$4 (new book)", books=True),
         rec(snap.get("mm_record"), "maker bot unique (sxbot mm)", books=True),
         rec(snap.get("record"), "combined unique (gate only)", books=True),
@@ -922,6 +979,8 @@ class BoardState:
         self.tape_at = 0.0
         self.seen_fills: set[str] = set()
         self.paper_n = 0
+        self.manual_n = 0
+        self.books_sent_at = 0.0
         self.primed = False
         self._stop = threading.Event()
 
@@ -996,9 +1055,16 @@ class BoardState:
                     f"picked {fill.get('picked')} {fill.get('decimal')}  {fill.get('result')}  {fill.get('label')}"
                 )
         paper = load_all_paper(self.settings.paper_log)
+        manuals = load_manual(getattr(self.settings, "manual_log", "sxbot-manual.jsonl"))
         if first:
             self.paper_n = len(paper)
+            self.manual_n = len(manuals)
             self.primed = True
+            try:
+                send_telegram(token, chat, format_dashboard(snap))
+                self.books_sent_at = time.time()
+            except Exception:
+                log.exception("telegram dashboard failed")
             return
         if len(paper) > self.paper_n:
             new = paper[self.paper_n :]
@@ -1010,6 +1076,21 @@ class BoardState:
                     f"PAPER {row.get('style') or ''} {row.get('action')}  "
                     f"{row.get('side')} {row.get('label')} @ {row.get('odds_pct')}%"
                 )
+        if len(manuals) > self.manual_n:
+            new_man = manuals[self.manual_n :]
+            self.manual_n = len(manuals)
+            for row in new_man:
+                alerts.append(
+                    f"YOU ${row.get('stake_usdc')} {row.get('picked')} "
+                    f"@{row.get('decimal')}  {row.get('book')}  {row.get('label')}"
+                )
+        interval = float(getattr(self.settings, "telegram_books_seconds", 21600) or 0)
+        if telegram_books_due(self.books_sent_at, interval, time.time()):
+            try:
+                send_telegram(token, chat, format_dashboard(snap))
+                self.books_sent_at = time.time()
+            except Exception:
+                log.exception("telegram dashboard failed")
         if not alerts:
             return
         body = "sxbot\n" + "\n".join(alerts[:12])
@@ -1075,7 +1156,7 @@ def serve_board(client: SxClient, settings: Settings, *, host: str, port: int) -
             send_telegram(
                 settings.telegram_token,
                 settings.telegram_chat_id,
-                f"sxbot board up  http://{host}:{port}",
+                f"sxbot telegram on  dashboard recap every {int(settings.telegram_books_seconds)}s",
             )
         except Exception:
             log.exception("telegram hello failed")

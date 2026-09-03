@@ -58,6 +58,19 @@ Only while `sxbot run` is actually running. There is no background daemon. Dry-r
 
 The board keeps **taker unique** (`sxbot run`) and **maker unique** (`sxbot mm`) on separate cards. Combined unique is the live-test gate only — do not read it as one bot's ROI. A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side.
 
+Your own tickets live in a third pile (`sxbot-manual.jsonl`). `sxbot bet add` logs one ticket; it is never unique-collapsed into the bot card. The board and `sxbot books` show **bot / you / together**. Together is bot unique + your tickets — still do not mix in the maker bot. Bot unique assumes fills; yours are the tickets you typed.
+
+**Where to read it:** the board is the table. `sxbot books` is the recap. Telegram is the phone push. Do this on the **machine that has the paper logs** (Linode / the box running `sxbot run`), not in a cloud chat:
+
+1. Telegram → `@BotFather` → `/newbot` → copy the token
+2. Send any message to that bot so it can see you
+3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `result.message.chat.id`
+4. Put `SX_TELEGRAM_TOKEN` and `SX_TELEGRAM_CHAT_ID` in that machine's `.env` (never commit them)
+5. `sxbot telegram` — you should get bot / you / together, short+EV, and CLV on your phone
+6. Leave `sxbot board` running there. It sends the dashboard on start, then every `SX_TELEGRAM_BOOKS_SECONDS` (default 6 hours), plus a ping when a new ticket lands.
+
+`sxbot doctor` prints `telegram on` or `off`. Email and Google Docs are a worse fit.
+
 Follow paper is split on the board into **best priced** (decimal ≤1.80), **maker EV** (steam / size parked on our side), and the overlap. Each card shows W–L, win%, and ROI on settled unique quotes (assumes fills). MM has its own unique card.
 
 Live orders additionally need `SX_API_KEY`, `SX_PRIVATE_KEY`, `pip install -e ".[trade]"`, a funded proxy, and `SX_DRY_RUN=false`. Keep paper mode on until that log looks like a strategy you actually want to fund.
@@ -90,6 +103,10 @@ sxbot mimic           # paper-copy new fills from those wallets (V2 only)
 sxbot mm              # pregame ghost maker, heavy side (paper; own log)
 sxbot board           # dashboard on THIS machine: http://127.0.0.1:8765
                       # unique W–L is lifetime (kickoff cancel keeps the card)
+sxbot bet add --picked Krejcikova --odds 1.45 --stake 25
+                      # log a ticket you placed (separate book)
+sxbot books           # bot / you / together — W–L, ROI, units, CLV
+sxbot telegram        # push that dashboard to your phone
 ```
 
 `sxbot flow --once` and `sxbot run --once` do two polls then exit. `sxbot mm --once` quotes the current pregame books immediately (it does not need a previous snapshot).
@@ -210,6 +227,23 @@ Two unique books sit on the board for the same cards:
 Botswana-style steam takes (`SX_FOLLOW_STYLE=take`) execute at a flat $5 on the *same* team as the makers. Stale leftover takes still use Kelly. Joins and MM stay flat. Do not go live from this shadow book. Do not score the taker bot as the complement of a maker quote.
 
 **Live-test gate:** after **100 unique settled** paper trades (follow + MM), the board flags `ready` only if **both** books are profitable. That flag is a tracker, not a deploy.
+
+## Your book vs the bot
+
+Log a ticket you placed yourself (SX or another book):
+
+```bash
+sxbot bet add --picked "Barbora Krejcikova" --odds 1.45 --stake 25
+sxbot bet add --picked Phillies --vs Athletics --odds -125 --stake 20 --book pinnacle
+sxbot bet add --picked Krejcikova --odds 1.78 --stake 25 --result win
+sxbot bet list
+sxbot bet settle --picked Krejcikova --result lose
+sxbot books
+```
+
+Odds can be decimal (`1.45`), implied percent (`69`), or American (`-125` / `+150`). If the name matches an SX market (or a bot paper card), the ticket grades when SX reports. Otherwise stamp `--result` or `sxbot bet settle`.
+
+Each card shows what a sports bettor actually checks: W–L, win%, ROI, P&L, units (P&L / average stake), average decimal, break-even win% at that price, win% vs break-even, pending / open exposure, streak, max drawdown, biggest win/loss, CLV vs close when we have a close, and by-league. Win% without the price is a trap — a 70% clip at 1.20 is still losing.
 
 **$200 CAD / ~145 USDC smoke (Linode only):** paste `live-test.env.example` into the VPS `.env`. Flat **1 USDC** (the live min), 4 open max, skip `tennis_dog`, pregame only, no maker bot, no Kelly size. Convert CAD → USDC and fund the SX **proxy**, not the EOA. Keep `SX_DRY_RUN=true` until keys + `pip install -e ".[trade]"` + `sxbot doctor` look right, then type `SX_DRY_RUN=false` yourself on that box. Never put `SX_PRIVATE_KEY` in git or on this cloud agent.
 
