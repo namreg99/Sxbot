@@ -6,13 +6,22 @@ import sys
 import time
 
 from sxbot.api import SxApiError, SxClient, index_markets
-from sxbot.board import build_snapshot, render_text, serve_board
+from sxbot.board import build_snapshot, render_text, send_telegram, serve_board
+from sxbot.books import format_books
 from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
 from sxbot.flow import Motive
 from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
 from sxbot.journal import iter_paper_logs, load_jsonl, print_summary
+from sxbot.manual import (
+    append_jsonl,
+    build_ticket,
+    find_ticket,
+    load_manual,
+    resolve_ticket_market,
+    settle_ticket,
+)
 from sxbot.overlap import format_overlap_report, format_tag
 from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
 from sxbot.scoreboard import format_scoreboard, grade_flow
@@ -122,6 +131,38 @@ def main(argv: list[str] | None = None) -> int:
     board.add_argument("--host", default=None, help="Bind address (default SX_BOARD_HOST / 127.0.0.1)")
     board.add_argument("--port", type=int, default=None, help="Port (default SX_BOARD_PORT / 8765)")
     board.add_argument("--once", action="store_true", help="Print one snapshot and exit")
+    books = sub.add_parser(
+        "books",
+        help="Bot unique vs your tickets vs together (W–L, ROI, units, CLV)",
+    )
+    books.add_argument(
+        "--telegram",
+        action="store_true",
+        help="Also push the recap to SX_TELEGRAM_CHAT_ID",
+    )
+    bet = sub.add_parser("bet", help="Log your own tickets (separate book from the bot)")
+    bet_sub = bet.add_subparsers(dest="bet_cmd")
+    add = bet_sub.add_parser("add", help="Record a ticket you placed")
+    add.add_argument("--picked", required=True, help="Team / player you bet")
+    add.add_argument("--odds", required=True, help="Decimal 1.45, percent 69, or American -145")
+    add.add_argument("--stake", type=float, required=True, help="Stake in dollars / USDC")
+    add.add_argument("--vs", default="", help="Opponent, used to find the SX market")
+    add.add_argument("--market", default="", help="SX market hash if you have it")
+    add.add_argument("--side", default="", help="outcome_one / outcome_two (or one / two)")
+    add.add_argument("--book", default="sx", help="Where you bet it (sx, pinnacle, ...)")
+    add.add_argument("--league", default="", help="Optional league label")
+    add.add_argument("--note", default="", help="Optional note")
+    add.add_argument(
+        "--result",
+        default="",
+        choices=["", "win", "lose", "void"],
+        help="Already settled? stamp it now",
+    )
+    settle = bet_sub.add_parser("settle", help="Mark one of your unmatched tickets win/lose/void")
+    settle.add_argument("--picked", default="", help="Player/team on the ticket")
+    settle.add_argument("--id", dest="ticket_id", default="", help="ticket_id from bet list")
+    settle.add_argument("--result", required=True, choices=["win", "lose", "void"])
+    bet_sub.add_parser("list", help="Print your logged tickets")
 
     args = parser.parse_args(argv)
     logging.basicConfig(
@@ -146,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
     if args.cmd == "summary":
-        print_summary(settings.flow_log, settings.paper_log)
+        print_summary(settings.flow_log, settings.paper_log, manual_path=settings.manual_log)
         mimic_rows = load_jsonl(settings.mimic_log)
         if mimic_rows:
             print()
@@ -180,6 +221,10 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_mm(client, settings, once=args.once)
             if args.cmd == "board":
                 return cmd_board(client, settings, args)
+            if args.cmd == "books":
+                return cmd_books(client, settings, args)
+            if args.cmd == "bet":
+                return cmd_bet(client, settings, args)
             bot = Bot(settings, client)
             if args.cmd == "scan":
                 return cmd_scan(bot, args.limit)
@@ -392,6 +437,98 @@ def cmd_grade(client: SxClient, settings: Settings) -> int:
         print()
         _print_grade(client, settings.mimic_log, title="mimic paper")
     return 0
+
+
+def cmd_books(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:
+    snap = build_snapshot(client, settings)
+    text = format_books(
+        snap.get("bot_book"),
+        snap.get("you_book"),
+        snap.get("together_book"),
+        you_tickets=snap.get("you_tickets") or [],
+    )
+    print(text)
+    if args.telegram:
+        token = settings.telegram_token
+        chat = settings.telegram_chat_id
+        if not token or not chat:
+            print(
+                "Telegram not configured. Set SX_TELEGRAM_TOKEN and SX_TELEGRAM_CHAT_ID.",
+                file=sys.stderr,
+            )
+            return 2
+        send_telegram(token, chat, text)
+        print("sent to telegram")
+    return 0
+
+
+def cmd_bet(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:
+    path = settings.manual_log
+    if not getattr(args, "bet_cmd", None):
+        print("usage: sxbot bet add|list|settle", file=sys.stderr)
+        return 2
+    if args.bet_cmd == "list":
+        tickets = load_manual(path)
+        if not tickets:
+            print(f"no tickets in {path}")
+            print("add one: sxbot bet add --picked NAME --odds 1.45 --stake 25")
+            return 0
+        print(f"your tickets  {len(tickets)}  ({path})")
+        for row in tickets:
+            stamped = row.get("settled_result") or "open"
+            print(
+                f"  {row.get('ticket_id')}  ${row.get('stake_usdc')} "
+                f"{row.get('picked')} @{row.get('decimal')}  {row.get('book')}  "
+                f"{stamped}  {row.get('label')}"
+            )
+        return 0
+    if args.bet_cmd == "settle":
+        tickets = load_manual(path)
+        try:
+            ticket = find_ticket(
+                tickets, ticket_id=args.ticket_id, picked=args.picked
+            )
+            settle_ticket(path, ticket, args.result)
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        print(f"settled {ticket.get('picked')} {args.result}  ({ticket.get('ticket_id')})")
+        return cmd_books(client, settings, argparse.Namespace(telegram=False))
+    if args.bet_cmd == "add":
+        try:
+            resolved = resolve_ticket_market(
+                client,
+                settings,
+                picked=args.picked,
+                vs=args.vs,
+                market_hash=args.market,
+            )
+            ticket = build_ticket(
+                picked=args.picked,
+                odds_raw=args.odds,
+                stake_usdc=args.stake,
+                vs=args.vs,
+                market_hash=args.market,
+                side=args.side,
+                book=args.book,
+                note=args.note,
+                league=args.league,
+                settled_result=args.result,
+                resolved=resolved,
+            )
+        except ValueError as exc:
+            print(exc, file=sys.stderr)
+            return 2
+        append_jsonl(path, ticket)
+        matched = "matched SX" if ticket.get("market") else "unmatched — settle by hand if needed"
+        print(
+            f"logged YOU ${ticket['stake_usdc']:g} {ticket['picked']} "
+            f"@{ticket['decimal']}  {ticket['book']}  {matched}"
+        )
+        print(f"  ticket {ticket['ticket_id']}  {ticket.get('label')}")
+        return cmd_books(client, settings, argparse.Namespace(telegram=False))
+    print("usage: sxbot bet add|list|settle", file=sys.stderr)
+    return 2
 
 
 def cmd_board(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:

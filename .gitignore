@@ -10,6 +10,9 @@ build/
 htmlcov/
 sxbot-paper.jsonl
 sxbot-paper-*.jsonl
+sxbot-live.jsonl
+sxbot-live-*.jsonl
+sxbot-manual.jsonl
 sxbot-mimic.jsonl
 sxbot-flow.jsonl
 sxbot-closes.jsonl

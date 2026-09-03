@@ -95,3 +95,19 @@ def test_live_log_stays_off_the_paper_card(tmp_path) -> None:
     assert live_log_for(paper, "mlb") == live
     assert [r["market"] for r in load_follow_paper(paper)] == ["0x1"]
     assert [r["market"] for r in load_follow_live(paper)] == ["0x9"]
+
+
+def test_summary_lists_manual_tickets(tmp_path) -> None:
+    flow = tmp_path / "flow.jsonl"
+    paper = tmp_path / "paper.jsonl"
+    manual = tmp_path / "sxbot-manual.jsonl"
+    flow.write_text("", encoding="utf-8")
+    paper.write_text("", encoding="utf-8")
+    manual.write_text(
+        '{"action":"manual","picked":"Krejcikova","decimal":1.45,"stake_usdc":25,'
+        '"book":"sx","label":"Rakhimova / Krejcikova","ticket_id":"aa"}\n',
+        encoding="utf-8",
+    )
+    text = format_summary(flow, paper, manual_path=manual)
+    assert "your tickets   1" in text
+    assert "Krejcikova" in text

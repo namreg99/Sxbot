@@ -21,6 +21,14 @@ def test_load_tob_lag_env_overrides(monkeypatch) -> None:
     assert settings.tob_lag_max_decimal == 1.80
 
 
+def test_load_manual_log(monkeypatch) -> None:
+    monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("SX_MANUAL_LOG", raising=False)
+    assert Settings.load().manual_log == "sxbot-manual.jsonl"
+    monkeypatch.setenv("SX_MANUAL_LOG", "my-tickets.jsonl")
+    assert Settings.load().manual_log == "my-tickets.jsonl"
+
+
 def test_load_skip_styles(monkeypatch) -> None:
     monkeypatch.setenv("SX_SKIP_STYLES", "tennis_dog, mlb")
     monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)

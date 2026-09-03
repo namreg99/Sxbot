@@ -117,7 +117,12 @@ def _count(rows: list[dict[str, Any]], key: str) -> Counter[str]:
     return Counter(str(row.get(key) or "-") for row in rows)
 
 
-def format_summary(flow_path: str | Path, paper_path: str | Path) -> str:
+def format_summary(
+    flow_path: str | Path,
+    paper_path: str | Path,
+    *,
+    manual_path: str | Path | None = None,
+) -> str:
     flow = load_jsonl(flow_path)
     paper_files = iter_paper_logs(paper_path)
     paper = load_all_paper(paper_path)
@@ -129,7 +134,12 @@ def format_summary(flow_path: str | Path, paper_path: str | Path) -> str:
             lines.append(f"paper orders  {n}   ({log})")
     else:
         lines.append(f"paper orders  0   ({paper_path})")
-    if not flow and not paper:
+    manuals: list[dict[str, Any]] = []
+    if manual_path:
+        from sxbot.manual import load_manual
+
+        manuals = load_manual(manual_path)
+    if not flow and not paper and not manuals:
         lines.append(
             "No logs yet. Leave `sxbot run` going — it only writes while the process is up."
         )
@@ -169,8 +179,22 @@ def format_summary(flow_path: str | Path, paper_path: str | Path) -> str:
                 f"{(row.get('side') or '-'):<12} {(row.get('label') or '')[:36]}  "
                 f"{row.get('odds_pct')}%"
             )
+    if manual_path:
+        lines.append("")
+        lines.append(f"your tickets   {len(manuals)}   ({manual_path})")
+        for row in manuals[-8:]:
+            lines.append(
+                f"  {(row.get('book') or 'you'):<8} {(row.get('picked') or '-'):<22} "
+                f"{row.get('decimal')}  ${row.get('stake_usdc')}  "
+                f"{(row.get('label') or '')[:36]}"
+            )
     return "\n".join(lines)
 
 
-def print_summary(flow_path: str | Path, paper_path: str | Path) -> None:
-    print(format_summary(flow_path, paper_path))
+def print_summary(
+    flow_path: str | Path,
+    paper_path: str | Path,
+    *,
+    manual_path: str | Path | None = None,
+) -> None:
+    print(format_summary(flow_path, paper_path, manual_path=manual_path))
