@@ -19,7 +19,13 @@ from urllib.parse import urlparse
 import httpx
 
 from sxbot.api import SxClient, index_markets, lookup_market
-from sxbot.books import bettor_card, format_card, format_card_oneline
+from sxbot.books import (
+    bettor_card,
+    format_card,
+    format_card_oneline,
+    format_dashboard,
+    telegram_books_due,
+)
 from sxbot.config import Settings
 from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
@@ -974,6 +980,7 @@ class BoardState:
         self.seen_fills: set[str] = set()
         self.paper_n = 0
         self.manual_n = 0
+        self.books_sent_at = 0.0
         self.primed = False
         self._stop = threading.Event()
 
@@ -1053,6 +1060,11 @@ class BoardState:
             self.paper_n = len(paper)
             self.manual_n = len(manuals)
             self.primed = True
+            try:
+                send_telegram(token, chat, format_dashboard(snap))
+                self.books_sent_at = time.time()
+            except Exception:
+                log.exception("telegram dashboard failed")
             return
         if len(paper) > self.paper_n:
             new = paper[self.paper_n :]
@@ -1072,6 +1084,13 @@ class BoardState:
                     f"YOU ${row.get('stake_usdc')} {row.get('picked')} "
                     f"@{row.get('decimal')}  {row.get('book')}  {row.get('label')}"
                 )
+        interval = float(getattr(self.settings, "telegram_books_seconds", 21600) or 0)
+        if telegram_books_due(self.books_sent_at, interval, time.time()):
+            try:
+                send_telegram(token, chat, format_dashboard(snap))
+                self.books_sent_at = time.time()
+            except Exception:
+                log.exception("telegram dashboard failed")
         if not alerts:
             return
         body = "sxbot\n" + "\n".join(alerts[:12])
@@ -1137,7 +1156,7 @@ def serve_board(client: SxClient, settings: Settings, *, host: str, port: int) -
             send_telegram(
                 settings.telegram_token,
                 settings.telegram_chat_id,
-                f"sxbot board up  http://{host}:{port}",
+                f"sxbot telegram on  dashboard recap every {int(settings.telegram_books_seconds)}s",
             )
         except Exception:
             log.exception("telegram hello failed")

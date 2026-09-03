@@ -1,4 +1,10 @@
-from sxbot.books import bettor_card, format_books, format_card_oneline
+from sxbot.books import (
+    bettor_card,
+    format_books,
+    format_card_oneline,
+    format_dashboard,
+    telegram_books_due,
+)
 
 
 def _ticket(
@@ -92,3 +98,41 @@ def test_format_books_keeps_three_piles() -> None:
     assert "YouPick" in text
     assert "paper assumes fills" in text
     assert format_card_oneline(bot).startswith("1–0")
+
+
+def test_format_dashboard_is_the_phone_card() -> None:
+    bot = bettor_card([_ticket(result="win", decimal=1.5, stake=5, picked="BotPick", clv_pct=2.0)])
+    you = bettor_card([_ticket(result="lose", decimal=2.0, stake=25, picked="YouPick")])
+    text = format_dashboard(
+        {
+            "generated_at": "2026-09-03 23:00 UTC",
+            "priced_ev": {"wins": 94, "losses": 27, "win_pct": 77.7, "roi_pct": 14.3, "pnl_usdc": 80, "pending": 10},
+            "best_priced": {"wins": 99, "losses": 31, "win_pct": 76.2, "roi_pct": 12.4, "pending": 8},
+            "follow_record": {"wins": 173, "losses": 103, "win_pct": 62.7, "roi_pct": 10.9, "pending": 36},
+            "live_record": {"wins": 0, "losses": 0, "pending": 0},
+            "follow_clv": {"n": 145, "avg_clv_pct": 1.55, "beat_close": 113, "lost_close": 31},
+            "bot_book": bot,
+            "you_book": you,
+            "together_book": bettor_card(
+                [
+                    _ticket(result="win", decimal=1.5, stake=5, picked="BotPick"),
+                    _ticket(result="lose", decimal=2.0, stake=25, picked="YouPick"),
+                ]
+            ),
+            "you_tickets": [_ticket(result="lose", decimal=2.0, stake=25, picked="YouPick")],
+        }
+    )
+    assert "sxbot dashboard" in text
+    assert "short+EV  94–27" in text
+    assert "CLV  +1.55 pts  beat 113 / lost 31" in text
+    assert "BOT" in text
+    assert "YOU" in text
+    assert "TOGETHER" in text
+    assert "YouPick" in text
+
+
+def test_telegram_books_due() -> None:
+    assert telegram_books_due(0, 21600, 100) is True
+    assert telegram_books_due(50, 21600, 100) is False
+    assert telegram_books_due(50, 40, 100) is True
+    assert telegram_books_due(50, 0, 100) is False

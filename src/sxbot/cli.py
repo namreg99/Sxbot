@@ -7,7 +7,7 @@ import time
 
 from sxbot.api import SxApiError, SxClient, index_markets
 from sxbot.board import build_snapshot, render_text, send_telegram, serve_board
-from sxbot.books import format_books
+from sxbot.books import format_books, format_dashboard
 from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
 from sxbot.flow import Motive
@@ -27,6 +27,23 @@ from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
 from sxbot.scoreboard import format_scoreboard, grade_flow
 from sxbot.strategy import evaluate
 from sxbot.v2 import book_from_v2_orders
+
+TELEGRAM_SETUP = """
+Telegram is off. Do this on the machine that has the paper logs (not this chat):
+
+  1. Open Telegram, search @BotFather, send /newbot
+  2. Copy the token BotFather gives you
+  3. Message your new bot once (any text) so it can see you
+  4. Open https://api.telegram.org/bot<TOKEN>/getUpdates
+     Copy result.message.chat.id  (a number; groups look like -100...)
+  5. Put both in that machine's .env (never commit them):
+       SX_TELEGRAM_TOKEN=...
+       SX_TELEGRAM_CHAT_ID=...
+  6. sxbot telegram
+
+Leave `sxbot board` running there and it will re-send the dashboard every
+SX_TELEGRAM_BOOKS_SECONDS (default 6 hours) plus a ping when a ticket lands.
+""".strip()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -140,6 +157,10 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Also push the recap to SX_TELEGRAM_CHAT_ID",
     )
+    sub.add_parser(
+        "telegram",
+        help="Send the performance dashboard to Telegram (needs SX_TELEGRAM_TOKEN + CHAT_ID)",
+    )
     bet = sub.add_parser("bet", help="Log your own tickets (separate book from the bot)")
     bet_sub = bet.add_subparsers(dest="bet_cmd")
     add = bet_sub.add_parser("add", help="Record a ticket you placed")
@@ -223,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_board(client, settings, args)
             if args.cmd == "books":
                 return cmd_books(client, settings, args)
+            if args.cmd == "telegram":
+                return cmd_telegram(client, settings)
             if args.cmd == "bet":
                 return cmd_bet(client, settings, args)
             bot = Bot(settings, client)
@@ -282,6 +305,13 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
     print(f"follow_style  {settings.follow_style}")
     print(f"sharp wallets {len(settings.sharp_wallets)}")
     print(f"watch_live    {settings.watch_live}  allow_live_trades={settings.allow_live}")
+    if settings.telegram_token and settings.telegram_chat_id:
+        print(
+            f"telegram      on  recap every {int(settings.telegram_books_seconds)}s  "
+            f"(sxbot telegram)"
+        )
+    else:
+        print("telegram      off  — sxbot telegram  (prints setup)")
     sports = client.sports()
     print(f"sports        {len(sports)}")
     from itertools import islice
@@ -449,16 +479,33 @@ def cmd_books(client: SxClient, settings: Settings, args: argparse.Namespace) ->
     )
     print(text)
     if args.telegram:
-        token = settings.telegram_token
-        chat = settings.telegram_chat_id
-        if not token or not chat:
-            print(
-                "Telegram not configured. Set SX_TELEGRAM_TOKEN and SX_TELEGRAM_CHAT_ID.",
-                file=sys.stderr,
-            )
-            return 2
+        return _push_telegram(settings, format_dashboard(snap))
+    return 0
+
+
+def cmd_telegram(client: SxClient, settings: Settings) -> int:
+    if not settings.telegram_token or not settings.telegram_chat_id:
+        print(TELEGRAM_SETUP, file=sys.stderr)
+        return 2
+    snap = build_snapshot(client, settings)
+    text = format_dashboard(snap)
+    print(text)
+    return _push_telegram(settings, text)
+
+
+def _push_telegram(settings: Settings, text: str) -> int:
+    token = settings.telegram_token
+    chat = settings.telegram_chat_id
+    if not token or not chat:
+        print(TELEGRAM_SETUP, file=sys.stderr)
+        return 2
+    try:
         send_telegram(token, chat, text)
-        print("sent to telegram")
+    except Exception as exc:
+        print(f"telegram send failed: {exc}", file=sys.stderr)
+        print(TELEGRAM_SETUP, file=sys.stderr)
+        return 2
+    print("sent to telegram")
     return 0
 
 
@@ -547,12 +594,11 @@ def cmd_board(client: SxClient, settings: Settings, args: argparse.Namespace) ->
             "Run `sxbot board` on your own computer, or `sxbot board --once` here."
         )
     if settings.telegram_token and settings.telegram_chat_id:
-        print("telegram alerts enabled")
-    else:
         print(
-            "Telegram optional: set SX_TELEGRAM_TOKEN and SX_TELEGRAM_CHAT_ID "
-            "(BotFather bot, then message it and use getUpdates for the chat id)."
+            f"telegram dashboard on  (recap every {int(settings.telegram_books_seconds)}s)"
         )
+    else:
+        print(TELEGRAM_SETUP)
     serve_board(client, settings, host=host, port=port)
     return 0
 

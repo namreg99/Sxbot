@@ -60,7 +60,16 @@ The board keeps **taker unique** (`sxbot run`) and **maker unique** (`sxbot mm`)
 
 Your own tickets live in a third pile (`sxbot-manual.jsonl`). `sxbot bet add` logs one ticket; it is never unique-collapsed into the bot card. The board and `sxbot books` show **bot / you / together**. Together is bot unique + your tickets — still do not mix in the maker bot. Bot unique assumes fills; yours are the tickets you typed.
 
-**Where to read it:** the board is the table. `sxbot books` is the recap. Telegram (`sxbot books --telegram`, or board alerts) is the phone push. Do not use email or Google Docs — those need OAuth/SMTP and a sports bettor wants the number on their phone, not a spreadsheet login.
+**Where to read it:** the board is the table. `sxbot books` is the recap. Telegram is the phone push. Do this on the **machine that has the paper logs** (Linode / the box running `sxbot run`), not in a cloud chat:
+
+1. Telegram → `@BotFather` → `/newbot` → copy the token
+2. Send any message to that bot so it can see you
+3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` and copy `result.message.chat.id`
+4. Put `SX_TELEGRAM_TOKEN` and `SX_TELEGRAM_CHAT_ID` in that machine's `.env` (never commit them)
+5. `sxbot telegram` — you should get bot / you / together, short+EV, and CLV on your phone
+6. Leave `sxbot board` running there. It sends the dashboard on start, then every `SX_TELEGRAM_BOOKS_SECONDS` (default 6 hours), plus a ping when a new ticket lands.
+
+`sxbot doctor` prints `telegram on` or `off`. Email and Google Docs are a worse fit.
 
 Follow paper is split on the board into **best priced** (decimal ≤1.80), **maker EV** (steam / size parked on our side), and the overlap. Each card shows W–L, win%, and ROI on settled unique quotes (assumes fills). MM has its own unique card.
 
@@ -97,7 +106,7 @@ sxbot board           # dashboard on THIS machine: http://127.0.0.1:8765
 sxbot bet add --picked Krejcikova --odds 1.45 --stake 25
                       # log a ticket you placed (separate book)
 sxbot books           # bot / you / together — W–L, ROI, units, CLV
-sxbot books --telegram
+sxbot telegram        # push that dashboard to your phone
 ```
 
 `sxbot flow --once` and `sxbot run --once` do two polls then exit. `sxbot mm --once` quotes the current pregame books immediately (it does not need a previous snapshot).

@@ -251,6 +251,63 @@ def format_ticket(view: dict[str, Any]) -> str:
     ).rstrip()
 
 
+def format_wl(rec: dict[str, Any] | None, title: str) -> str:
+    if not rec:
+        return f"{title}  —"
+    wp = rec.get("win_pct")
+    wp_s = f"{wp:.1f}%" if wp is not None else "—"
+    roi = rec.get("roi_pct")
+    roi_s = f"  ROI {roi:+.1f}%" if roi is not None else ""
+    pnl = rec.get("pnl_usdc")
+    pnl_s = f"  P&L {pnl:+.2f}" if pnl is not None else ""
+    return (
+        f"{title}  {rec.get('wins', 0)}–{rec.get('losses', 0)}  "
+        f"win {wp_s}{roi_s}{pnl_s}  pending {rec.get('pending', 0)}"
+    )
+
+
+def format_dashboard(snap: dict[str, Any]) -> str:
+    """Phone recap: the performance cards, not the 5k tape table."""
+    clv = snap.get("follow_clv") or (snap.get("bot_book") or {}).get("clv") or {}
+    if clv.get("n"):
+        avg = clv.get("avg_clv_pct")
+        avg_s = f"{avg:+.2f} pts" if avg is not None else "—"
+        clv_line = (
+            f"CLV  {avg_s}  beat {clv.get('beat_close', 0)} / "
+            f"lost {clv.get('lost_close', 0)}  (n={clv.get('n')})"
+        )
+    else:
+        clv_line = "CLV  no kickoff closes stamped yet"
+    lines = [
+        f"sxbot dashboard  {snap.get('generated_at') or ''}",
+        format_wl(snap.get("priced_ev"), "short+EV"),
+        format_wl(snap.get("best_priced"), "best priced"),
+        format_wl(snap.get("follow_record"), "bot unique $5"),
+        format_wl(snap.get("live_record"), "live $1–$4"),
+        clv_line,
+        "",
+        format_card(snap.get("bot_book"), "BOT"),
+        "",
+        format_card(snap.get("you_book"), "YOU"),
+        "",
+        format_card(snap.get("together_book"), "TOGETHER"),
+    ]
+    tickets = list(snap.get("you_tickets") or [])[:6]
+    if tickets:
+        lines.append("")
+        lines.append("your tickets")
+        for view in tickets:
+            lines.append(format_ticket(view))
+    text = "\n".join(lines)
+    return text[:3900]
+
+
+def telegram_books_due(last_sent: float, interval: float, now: float) -> bool:
+    if interval <= 0:
+        return False
+    return last_sent <= 0 or (now - last_sent) >= interval
+
+
 def format_books(
     bot: dict[str, Any] | None,
     you: dict[str, Any] | None,

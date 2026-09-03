@@ -115,6 +115,7 @@ class Settings:
     big_fill_usdc: float = 5000.0
     telegram_token: str | None = None
     telegram_chat_id: str | None = None
+    telegram_books_seconds: float = 21600.0
     manual_log: str = "sxbot-manual.jsonl"
     # Pregame maker (`sxbot mm`). Default is one-sided ghost quotes on the
     # heavy book. Two-sided mode widens behind the inside until both quotes
@@ -199,6 +200,7 @@ class Settings:
             big_fill_usdc=float(os.getenv("SX_BIG_FILL_USDC", "5000")),
             telegram_token=os.getenv("SX_TELEGRAM_TOKEN") or None,
             telegram_chat_id=os.getenv("SX_TELEGRAM_CHAT_ID") or None,
+            telegram_books_seconds=float(os.getenv("SX_TELEGRAM_BOOKS_SECONDS", "21600")),
             manual_log=os.getenv("SX_MANUAL_LOG", "sxbot-manual.jsonl"),
             mm_max_widen_ticks=int(os.getenv("SX_MM_MAX_WIDEN_TICKS", "6")),
             mm_min_overround_bps=int(os.getenv("SX_MM_MIN_OVERROUND_BPS", "25")),

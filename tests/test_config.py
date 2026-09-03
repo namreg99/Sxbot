@@ -21,6 +21,14 @@ def test_load_tob_lag_env_overrides(monkeypatch) -> None:
     assert settings.tob_lag_max_decimal == 1.80
 
 
+def test_load_telegram_books_seconds(monkeypatch) -> None:
+    monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.delenv("SX_TELEGRAM_BOOKS_SECONDS", raising=False)
+    assert Settings.load().telegram_books_seconds == 21600.0
+    monkeypatch.setenv("SX_TELEGRAM_BOOKS_SECONDS", "3600")
+    assert Settings.load().telegram_books_seconds == 3600.0
+
+
 def test_load_manual_log(monkeypatch) -> None:
     monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
     monkeypatch.delenv("SX_MANUAL_LOG", raising=False)
