@@ -108,7 +108,14 @@ class Executor:
 
         time_in_force = "GTC" if signal.action is Action.JOIN_MAKER else "IOC"
         order = self._sign_order(signal, stake, time_in_force)
-        result = self.client.create_orders([order], wait=True)
+        try:
+            result = self.client.create_orders([order], wait=True)
+        except Exception as exc:
+            from sxbot.api import SxApiError
+
+            if isinstance(exc, SxApiError):
+                log.error("LIVE HTTP %s %s %s", exc.status, exc.url, exc.body[:500])
+            raise
         record["result"] = result
         record["clientOrderId"] = order.get("clientOrderId")
         log.info("LIVE %s %s -> %s", signal.action.value, signal.market.label, result)
@@ -117,31 +124,56 @@ class Executor:
 
     def _sign_order(self, signal: Signal, stake: int, time_in_force: str) -> dict[str, Any]:
         from eth_account.messages import encode_typed_data
+        from eth_utils import to_checksum_address
 
         account = self._account
-        salt = "0x" + secrets.token_hex(32)
+        salt_hex = "0x" + secrets.token_hex(32)
         expiry = int(time.time()) + 3600
-        unsigned = {
-            "marketHash": signal.market.market_hash,
-            "baseToken": self.meta.base_token,
-            "totalBetSize": str(stake),
-            "percentageOdds": str(signal.maker_odds),
-            "salt": salt,
-            "expiry": expiry,
-            "maker": account.address,
-            "isMakerBettingOutcomeOne": signal.side.is_outcome_one,
+        market_hash = _bytes32(signal.market.market_hash)
+        base_token = to_checksum_address(self.meta.base_token)
+        maker = to_checksum_address(account.address)
+        domain = {
+            "name": self.meta.domain["name"],
+            "version": str(self.meta.domain["version"]),
+            "chainId": int(self.meta.domain.get("chainId") or self.meta.chain_id),
+            "verifyingContract": to_checksum_address(self.meta.domain["verifyingContract"]),
         }
         message = {
-            **unsigned,
-            "totalBetSize": int(unsigned["totalBetSize"]),
-            "percentageOdds": int(unsigned["percentageOdds"]),
-            "salt": int(unsigned["salt"], 16),
+            "marketHash": market_hash,
+            "baseToken": base_token,
+            "totalBetSize": int(stake),
+            "percentageOdds": int(signal.maker_odds),
+            "salt": int(salt_hex, 16),
+            "expiry": expiry,
+            "maker": maker,
+            "isMakerBettingOutcomeOne": signal.side.is_outcome_one,
         }
-        signable = encode_typed_data(self.meta.domain, ORDER_TYPES, message)
+        structured = {
+            "types": {
+                "EIP712Domain": [
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "chainId", "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"},
+                ],
+                "Order": ORDER_TYPES["Order"],
+            },
+            "primaryType": "Order",
+            "domain": domain,
+            "message": message,
+        }
+        signable = encode_typed_data(full_message=structured)
         signed = account.sign_message(signable)
-        client_order_id = f"sxbot-{signal.market.market_hash[2:10]}-{signal.side.value[:3]}-{int(time.time())}"
+        client_order_id = f"sxbot-{market_hash[2:10]}-{signal.side.value[:3]}-{int(time.time())}"
         return {
-            **unsigned,
+            "marketHash": market_hash,
+            "baseToken": base_token,
+            "totalBetSize": str(stake),
+            "percentageOdds": str(signal.maker_odds),
+            "salt": salt_hex,
+            "expiry": expiry,
+            "maker": maker,
+            "isMakerBettingOutcomeOne": signal.side.is_outcome_one,
             "timeInForce": time_in_force,
             "orderSignature": signed.signature.to_0x_hex(),
             "clientOrderId": client_order_id[:64],
@@ -166,6 +198,14 @@ class Executor:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")
+
+
+def _bytes32(value: str) -> str:
+    raw = value[2:] if value.lower().startswith("0x") else value
+    raw = raw.lower()
+    if len(raw) > 64 or any(c not in "0123456789abcdef" for c in raw):
+        raise ValueError("marketHash is not 32-byte hex")
+    return "0x" + raw.rjust(64, "0")
 
 
 def normalize_private_key(private_key: str) -> str:
