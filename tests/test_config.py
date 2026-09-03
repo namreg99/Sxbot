@@ -18,3 +18,10 @@ def test_load_tob_lag_env_overrides(monkeypatch) -> None:
     settings = Settings.load()
     assert settings.join_tob_lag is False
     assert settings.tob_lag_max_decimal == 1.80
+
+
+def test_load_skip_styles(monkeypatch) -> None:
+    monkeypatch.setenv("SX_SKIP_STYLES", "tennis_dog, mlb")
+    monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
+    settings = Settings.load()
+    assert settings.skip_styles == ("tennis_dog", "mlb")

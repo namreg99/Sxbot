@@ -41,6 +41,9 @@ def test_quote_style_tennis_bands() -> None:
     assert quote_style(tennis, from_percent(50.0), make_settings()) is None
     assert quote_style(tennis, from_percent(32.0), make_settings()) == "tennis_dog"
     assert quote_style(tennis, from_percent(18.0), make_settings()) is None
+    skipped = make_settings(skip_styles=("tennis_dog",))
+    assert quote_style(tennis, from_percent(80.0), skipped) == "tennis_short"
+    assert quote_style(tennis, from_percent(32.0), skipped) is None
 
 
 def test_quote_family_skips_npb_kbo() -> None:

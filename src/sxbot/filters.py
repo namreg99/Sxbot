@@ -178,19 +178,24 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
         return None
     dec = decimal_odds(to_prob(price))
     cap = float(settings.max_order_decimal or 3.5)
+    style: str | None = None
     if is_soccer_ml(market) and _in_band(dec, 1.12, 2.20):
-        return "soccer"
-    if is_mlb(market) and _in_band(dec, 1.80, 2.20):
-        return "mlb"
-    if is_nfl(market) and _in_band(dec, 1.80, 2.20):
-        return "soccer"
-    if is_tennis(market):
+        style = "soccer"
+    elif is_mlb(market) and _in_band(dec, 1.80, 2.20):
+        style = "mlb"
+    elif is_nfl(market) and _in_band(dec, 1.80, 2.20):
+        style = "soccer"
+    elif is_tennis(market):
         if _in_band(dec, 1.12, 1.80):
-            return "tennis_short"
-        dog_hi = min(3.50, cap) if cap > 0 else 3.50
-        if _in_band(dec, 2.20, dog_hi):
-            return "tennis_dog"
-    return None
+            style = "tennis_short"
+        else:
+            dog_hi = min(3.50, cap) if cap > 0 else 3.50
+            if _in_band(dec, 2.20, dog_hi):
+                style = "tennis_dog"
+    skipped = {s.strip().lower() for s in settings.skip_styles if s}
+    if style and style in skipped:
+        return None
+    return style
 
 
 def _half_open(dec: float, low: float, high: float) -> bool:

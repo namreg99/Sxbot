@@ -198,7 +198,8 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
     print(f"token         {meta.base_token}")
     print(f"escrow        {meta.escrow}")
     print(f"ladder step   {meta.odds_ladder_step_size} x 1e15  ({meta.odds_ladder_step_size / 1000:.3f}%)")
-    print(f"min order     {meta.min_order} base units")
+    min_usdc = meta.min_order / 10 ** meta.decimals
+    print(f"min order     {meta.min_order} base units  ({min_usdc:g} USDC)")
     print(f"dry_run       {settings.dry_run}")
     print(f"follow_style  {settings.follow_style}")
     print(f"sharp wallets {len(settings.sharp_wallets)}")
