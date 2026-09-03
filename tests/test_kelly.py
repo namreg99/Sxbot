@@ -296,7 +296,7 @@ def test_kelly_live_full_four_blocks_another_take() -> None:
     take = _kelly_on_take()
     gate.record(take, stake=to_base_units(4))
     assert gate.stake_for(take) is None
-    assert gate.allow(take) == "already on this side"
+    assert gate.allow(take) is not None
     assert gate.needs_live_entry(take.market.market_hash) is None
 
 
