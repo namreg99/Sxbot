@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     live_ping.add_argument(
         "--yes",
         action="store_true",
-        help="Required. Sends a real signed 1 USDC order. Unlikely to fill; cancel if it rests.",
+        help="Required. Sends a real signed 1 USDC FOK at the touch. It can fill.",
     )
     sub.add_parser("summary", help="Print recorded flow + paper-trade logs")
     sub.add_parser(
@@ -268,16 +268,15 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
 
 
 def cmd_live_ping(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:
-    """One signed 1 USDC FOK, priced off the touch so it should not fill."""
+    """One signed 1 USDC FOK at the touch. Can fill. Linode IPs often 403."""
     from dataclasses import replace
 
     from sxbot.executor import Executor
     from sxbot.models import Action, Side, Signal
-    from sxbot.units import OddsLadder, to_percent
+    from sxbot.units import OddsLadder, taker_odds, to_percent
 
     if not args.yes:
-        print("Refusing: pass --yes to send a real signed 1 USDC order.")
-        print("This is a POST /orders-v3 probe. It can 403 on datacenter IPs without spending.")
+        print("Refusing: pass --yes to send a real signed 1 USDC take.")
         return 2
     if not settings.api_key or not settings.private_key:
         print("Need SX_API_KEY and SX_PRIVATE_KEY in .env")
@@ -291,6 +290,7 @@ def cmd_live_ping(client: SxClient, settings: Settings, args: argparse.Namespace
 
     market = None
     price = 0
+    picked = ""
     for candidate in client.active_markets(
         only_main_line=True,
         sport_ids=settings.sport_ids or (6, 3, 5),
@@ -303,16 +303,17 @@ def cmd_live_ping(client: SxClient, settings: Settings, args: argparse.Namespace
             book = client.snapshot(candidate.market_hash)
         except SxApiError:
             continue
-        best = book.outcome_one[0].percentage_odds if book.outcome_one else 0
-        if best <= 0:
+        if not book.outcome_two:
             continue
-        price = ladder.tick_down(best, 12)
+        raw = taker_odds(book.outcome_two[0].percentage_odds)
+        price = ladder.clamp(raw)
         if price <= 0:
             continue
         market = candidate
+        picked = candidate.outcome_one
         break
     if market is None or price <= 0:
-        print("No pregame book to probe")
+        print("No pregame book to take")
         return 2
 
     signal = Signal(
@@ -320,16 +321,16 @@ def cmd_live_ping(client: SxClient, settings: Settings, args: argparse.Namespace
         side=Side.OUTCOME_ONE,
         action=Action.TAKE_FLOW,
         maker_odds=price,
-        reason="1 USDC live-ping",
+        reason="1 USDC live take",
         mid_move_bps=0,
         imbalance=0.0,
         confidence=0.0,
     )
     order = executor._sign_order(signal, stake, "FOK")
     print(f"market   {market.label}")
-    print(f"side     {market.outcome_one}")
-    print("size     1 USDC")
-    print(f"odds     {to_percent(price):.3f}% implied (12 ticks behind touch, FOK)")
+    print(f"take     {picked}")
+    print("size     1 USDC FOK at the touch")
+    print(f"odds     {to_percent(price):.3f}% implied")
     print("posting  POST /orders-v3 …")
     try:
         result = client.create_orders([order], wait=True)
@@ -338,15 +339,10 @@ def cmd_live_ping(client: SxClient, settings: Settings, args: argparse.Namespace
         print(f"url      {exc.url}")
         print(f"body     {exc.body[:500]}")
         if exc.status == 403:
-            print("SX refused the signed $1 order from this IP. Same as the empty POST.")
+            print("SX refused the signed $1 order from this IP. $0 spent.")
         return 1
     print("HTTP     200")
     print(f"result   {result}")
-    try:
-        client.cancel_all()
-        print("cancel   DELETE /orders-v3/all ok")
-    except SxApiError as exc:
-        print(f"cancel   HTTP {exc.status} {exc.body[:200]}")
     return 0
 
 
