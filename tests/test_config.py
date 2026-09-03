@@ -25,3 +25,10 @@ def test_load_skip_styles(monkeypatch) -> None:
     monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
     settings = Settings.load()
     assert settings.skip_styles == ("tennis_dog", "mlb")
+
+
+def test_load_dry_run_strips_null_bytes(monkeypatch) -> None:
+    monkeypatch.setenv("SX_DRY_RUN", "false\x00")
+    monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
+    settings = Settings.load()
+    assert settings.dry_run is False
