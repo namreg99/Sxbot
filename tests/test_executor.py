@@ -1,7 +1,23 @@
+import pytest
+
 from sxbot.models import Action, ExchangeMeta, Side, Signal
-from sxbot.executor import Executor
+from sxbot.executor import Executor, normalize_private_key
 from sxbot.units import from_percent
 from tests.conftest import make_market, make_settings
+
+
+def test_normalize_private_key_strips_quotes_and_0x() -> None:
+    raw = "11" * 32
+    assert normalize_private_key(raw) == "0x" + raw
+    assert normalize_private_key("  0x" + raw + "  ") == "0x" + raw
+    assert normalize_private_key('"' + raw + '"') == "0x" + raw
+
+
+def test_normalize_private_key_rejects_non_hex() -> None:
+    with pytest.raises(ValueError, match="not hexadecimal"):
+        normalize_private_key("not-a-private-key-value-at-all-xxxx")
+    with pytest.raises(ValueError, match="64 hex"):
+        normalize_private_key("abcd")
 
 
 def test_dry_run_writes_paper_log(tmp_path) -> None:

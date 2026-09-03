@@ -170,6 +170,21 @@ class Executor:
             handle.write(json.dumps(record) + "\n")
 
 
+def normalize_private_key(private_key: str) -> str:
+    """Strip copy-paste junk. eth_account wants 32-byte hex, optional 0x."""
+    key = private_key.strip().strip("\ufeff").strip("\"'“”‘’`")
+    if key.lower().startswith("0x"):
+        key = key[2:]
+    key = "".join(key.split())
+    if not key:
+        raise ValueError("SX_PRIVATE_KEY is empty")
+    if any(c not in "0123456789abcdefABCDEF" for c in key):
+        raise ValueError("SX_PRIVATE_KEY is not hexadecimal (quotes, spaces, or extra text)")
+    if len(key) != 64:
+        raise ValueError(f"SX_PRIVATE_KEY must be 64 hex characters, got {len(key)}")
+    return "0x" + key.lower()
+
+
 def _load_account(private_key: str | None) -> Any:
     if not private_key:
         raise RuntimeError("SX_PRIVATE_KEY is required for live trading")
@@ -177,4 +192,4 @@ def _load_account(private_key: str | None) -> Any:
         from eth_account import Account
     except ImportError as exc:
         raise RuntimeError("Install live-trading extras: pip install 'sxbot[trade]'") from exc
-    return Account.from_key(private_key)
+    return Account.from_key(normalize_private_key(private_key))
