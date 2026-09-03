@@ -106,6 +106,34 @@ def test_take_first_joins_when_take_is_off() -> None:
     assert signals[0].maker_odds == from_percent(52.875)
 
 
+def test_take_first_keeps_tennis_short_when_take_pays_inside_1_12() -> None:
+    """Eala @ 1.13 is unique tennis_short. Hitting the dog can be 1.11 — still take."""
+    prev = make_book(o1=((85.0, 10),), o2=((14.0, 10),), version="1")
+    curr = make_book(o1=((88.5, 10),), o2=((10.0, 10),), version="2")
+    market = make_market(
+        type=52,
+        sport_id=6,
+        sport_label="Tennis",
+        league_id=2,
+        league_label="WTA",
+        outcome_one="Alexandra Eala",
+        outcome_two="Oleksandra Oliynikova",
+        team_one="Alexandra Eala",
+        team_two="Oleksandra Oliynikova",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="take_first"),
+        OddsLadder(125),
+    )
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].style == "tennis_short"
+    assert signals[0].side is Side.OUTCOME_ONE
+
+
 def test_mixed_style_skips_tob_lag_unless_enabled() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((50.0, 1), (54.0, 20)), o2=((49.0, 10),), version="2")

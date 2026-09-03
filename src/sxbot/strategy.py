@@ -85,10 +85,16 @@ def _priced(
     settings: Settings,
     *,
     crossed: bool,
+    style_from: int | None = None,
 ) -> Signal | None:
+    """`style_from` is the unique-follow touch. Takes can be a tick shorter and
+    still belong in tennis_short / soccer; gating on the take decimal dropped them.
+    """
     if longshot_skip_reason(price, settings):
         return None
-    style = quote_style(market, price, settings)
+    style = quote_style(market, style_from or price, settings)
+    if not style and style_from:
+        style = quote_style(market, price, settings)
     if not style:
         return None
     return _signal(market, report, view, action, price, crossed=crossed, style=style)
@@ -164,6 +170,7 @@ def evaluate(
                     take_price,
                     settings,
                     crossed=curr.crossed,
+                    style_from=curr.best(report.side),
                 )
                 if signal is not None:
                     signals.append(signal)
@@ -180,7 +187,8 @@ def evaluate(
         price = _take_against(curr, report.side)
         if price is not None:
             signal = _priced(
-                market, report, curr, Action.TAKE_FLOW, price, settings, crossed=curr.crossed
+                market, report, curr, Action.TAKE_FLOW, price, settings, crossed=curr.crossed,
+                style_from=curr.best(report.side),
             )
             if signal is not None:
                 signals.append(signal)

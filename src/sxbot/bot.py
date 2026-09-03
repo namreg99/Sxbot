@@ -264,8 +264,9 @@ class Bot:
 
     def run(self) -> None:
         log.info(
-            "starting bot dry_run=%s base=%s books=%s min_order=%s USDC step=%s",
+            "starting bot dry_run=%s follow_style=%s base=%s books=%s min_order=%s USDC step=%s",
             self.settings.dry_run,
+            self.settings.follow_style,
             self.settings.api_base,
             self.book_source,
             self.meta.min_order / 10**self.meta.decimals,
