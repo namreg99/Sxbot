@@ -158,6 +158,41 @@ def test_risk_stake_for_skips_no_edge_take() -> None:
     assert gate.stake_for(flow) == to_base_units(5)
 
 
+def test_kelly_live_cap_scales_shadow_25_to_4() -> None:
+    gate = RiskGate(
+        make_settings(
+            stake_usdc=1,
+            max_per_market_usdc=4,
+            kelly_live_cap=True,
+            bankroll_usdc=1000,
+        )
+    )
+    join = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=from_percent(50.0),
+        reason="makers shifted",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(55.0),
+    )
+    assert gate.stake_for(join) == to_base_units(4)
+    skip = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=from_percent(50.0),
+        reason="no edge",
+        mid_move_bps=10,
+        imbalance=0.1,
+        confidence=0.5,
+        fair_odds=from_percent(50.0),
+    )
+    assert gate.stake_for(skip) == to_base_units(1)
+
+
 def test_allow_uses_passed_kelly_stake() -> None:
     gate = RiskGate(make_settings(max_per_market_usdc=10, max_exposure_usdc=1000, stake_usdc=5))
     signal = Signal(

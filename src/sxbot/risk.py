@@ -5,7 +5,7 @@ from typing import Any
 
 from sxbot.config import Settings
 from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
-from sxbot.kelly import KELLY_ACTIONS, sized_take_usdc
+from sxbot.kelly import KELLY_ACTIONS, UNIQUE_KELLY_MAX_USDC, sized_take_usdc, tracker_kelly_usdc
 from sxbot.models import Action, Exposure, Side, Signal
 from sxbot.units import to_base_units
 
@@ -28,11 +28,10 @@ class RiskGate:
         return to_base_units(self.settings.stake_usdc, self.decimals)
 
     def stake_for(self, signal: Signal) -> int | None:
-        """Base-units stake: flat floor, Kelly cap when there is edge.
+        """Base-units stake: unique floor, Kelly-scaled cap.
 
-        Joins use flat $SX_STAKE_USDC as the floor. When Kelly says bet more,
-        the live size rises to min(kelly, SX_MAX_PER_MARKET_USDC) — but never
-        below the flat floor. Kelly skip (no edge) still executes at the flat.
+        No-edge unique still bets SX_STAKE_USDC. A paper Kelly shadow of $25
+        scales to SX_MAX_PER_MARKET_USDC ($4 on the live smoke).
         Stale takes (TAKE_STALE) size with Kelly; no edge → skip entirely.
         """
         if signal.action in KELLY_ACTIONS:
@@ -43,20 +42,16 @@ class RiskGate:
         flat = self.stake()
         if not bool(getattr(self.settings, "kelly_live_cap", False)):
             return flat
-        from sxbot.kelly import fair_prob, kelly_stake_usdc
-        from sxbot.units import decimal_odds, to_prob
-        p = fair_prob(signal)
-        if p is None:
+        # Map the $5/$25 paper Kelly card onto live $1/$4: no-edge unique stays
+        # the floor; a $25 Kelly shadow scales to the per-market cap.
+        shadow = tracker_kelly_usdc(signal)
+        if shadow is None or shadow <= 0:
             return flat
-        kelly = kelly_stake_usdc(
-            self.settings,
-            p=p,
-            decimal=decimal_odds(to_prob(signal.maker_odds)),
-        )
-        if kelly is None or kelly <= 0:
-            return flat
-        sized = to_base_units(kelly, self.decimals)
-        return max(sized, flat)
+        cap = float(self.settings.max_per_market_usdc)
+        floor = float(self.settings.stake_usdc)
+        scale = cap / UNIQUE_KELLY_MAX_USDC if UNIQUE_KELLY_MAX_USDC else 1.0
+        sized = max(floor, min(cap, shadow * scale))
+        return to_base_units(sized, self.decimals)
 
     def hydrate(self, rows: list[dict[str, Any]], *, now: int | None = None) -> None:
         """Remember market+side already quoted so a restart does not restack.
