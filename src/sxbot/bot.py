@@ -271,6 +271,7 @@ class Bot:
             style=style,
             fair_odds=fair,
             motive="retry_unfilled",
+            tracker_odds=view.best(side) or price,
         )
         pending = self.risk.pending_order_ids.get(market.market_hash) or []
         if pending:

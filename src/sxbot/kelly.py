@@ -125,6 +125,10 @@ def shadow_kelly_usdc(settings: object, signal: Signal) -> float | None:
     )
 
 
+def _tracker_price(signal: Signal) -> int:
+    return int(signal.tracker_odds or signal.maker_odds)
+
+
 def tracker_kelly_usdc(signal: Signal) -> float | None:
     """⅝ Kelly on the $1000 / $25 paper card, ignoring live stake caps."""
     if signal.action not in TRADE_ACTIONS:
@@ -132,9 +136,12 @@ def tracker_kelly_usdc(signal: Signal) -> float | None:
     p = fair_prob(signal)
     if p is None:
         return None
+    price = _tracker_price(signal)
+    if price <= 0:
+        return None
     return take_stake_usdc(
         p=p,
-        decimal=decimal_odds(to_prob(signal.maker_odds)),
+        decimal=decimal_odds(to_prob(price)),
         bankroll=UNIQUE_BANKROLL_USDC,
         fraction=UNIQUE_KELLY_FRACTION,
         min_usdc=UNIQUE_FLAT_USDC,

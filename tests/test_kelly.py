@@ -193,6 +193,38 @@ def test_kelly_live_cap_scales_shadow_25_to_4() -> None:
     assert gate.stake_for(skip) == to_base_units(1)
 
 
+def test_kelly_live_4_uses_unique_touch_not_worse_take() -> None:
+    """Paper $25 Kelly is vs the follow touch. Paying the spread must not drop to $1."""
+    gate = RiskGate(
+        make_settings(stake_usdc=1, max_per_market_usdc=4, kelly_live_cap=True)
+    )
+    take = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.TAKE_FLOW,
+        maker_odds=from_percent(54.0),
+        reason="take",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(55.0),
+        tracker_odds=from_percent(50.0),
+    )
+    assert gate.stake_for(take) == to_base_units(4)
+    no_touch = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.TAKE_FLOW,
+        maker_odds=from_percent(56.0),
+        reason="take",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(55.0),
+    )
+    assert gate.stake_for(no_touch) == to_base_units(1)
+
+
 def test_allow_uses_passed_kelly_stake() -> None:
     gate = RiskGate(make_settings(max_per_market_usdc=10, max_exposure_usdc=1000, stake_usdc=5))
     signal = Signal(

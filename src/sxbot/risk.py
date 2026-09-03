@@ -45,13 +45,15 @@ class RiskGate:
         flat = self.stake()
         if not bool(getattr(self.settings, "kelly_live_cap", False)):
             return flat
-        # Map the $5/$25 paper Kelly card onto live $1/$4: no-edge unique stays
-        # the floor; a $25 Kelly shadow scales to the per-market cap.
+        # Map the $5/$25 paper Kelly card onto live $1/$4 using the unique
+        # *touch*, not the worse take fill. A $25 paper Kelly shadow → $4.
         shadow = tracker_kelly_usdc(signal)
         if shadow is None or shadow <= 0:
             return flat
         cap = float(self.settings.max_per_market_usdc)
         floor = float(self.settings.stake_usdc)
+        if shadow + 1e-9 >= UNIQUE_KELLY_MAX_USDC:
+            return to_base_units(cap, self.decimals)
         scale = cap / UNIQUE_KELLY_MAX_USDC if UNIQUE_KELLY_MAX_USDC else 1.0
         sized = max(floor, min(cap, shadow * scale))
         return to_base_units(sized, self.decimals)

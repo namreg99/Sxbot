@@ -180,6 +180,8 @@ class Signal:
     motive: str = ""
     style: str = ""
     fair_odds: int = 0
+    # Unique-follow touch for Kelly. Takes fill worse; size still uses this.
+    tracker_odds: int = 0
 
 
 @dataclass

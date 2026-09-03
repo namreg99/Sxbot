@@ -55,6 +55,7 @@ def _signal(
     *,
     crossed: bool,
     style: str,
+    tracker_odds: int = 0,
 ) -> Signal:
     assert report.side is not None
     fair = 0
@@ -73,6 +74,7 @@ def _signal(
         motive=report.motive.value,
         style=style,
         fair_odds=fair,
+        tracker_odds=tracker_odds or price,
     )
 
 
@@ -97,7 +99,16 @@ def _priced(
         style = quote_style(market, price, settings)
     if not style:
         return None
-    return _signal(market, report, view, action, price, crossed=crossed, style=style)
+    return _signal(
+        market,
+        report,
+        view,
+        action,
+        price,
+        crossed=crossed,
+        style=style,
+        tracker_odds=style_from or price,
+    )
 
 
 def _tob_lag_join_ok(price: int, settings: Settings, style: str | None) -> bool:
