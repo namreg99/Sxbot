@@ -225,6 +225,103 @@ def test_kelly_live_4_uses_unique_touch_not_worse_take() -> None:
     assert gate.stake_for(no_touch) == to_base_units(1)
 
 
+def _kelly_live_gate() -> RiskGate:
+    return RiskGate(
+        make_settings(
+            dry_run=False,
+            stake_usdc=1,
+            max_per_market_usdc=4,
+            max_exposure_usdc=1000,
+            kelly_live_cap=True,
+        )
+    )
+
+
+def _kelly_on_take(hash_: str = "0x1") -> Signal:
+    return Signal(
+        market=make_market(market_hash=hash_, event_id=hash_),
+        side=Side.OUTCOME_ONE,
+        action=Action.TAKE_FLOW,
+        maker_odds=from_percent(54.0),
+        reason="take",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(55.0),
+        tracker_odds=from_percent(50.0),
+    )
+
+
+def _kelly_skip_take(hash_: str = "0x1") -> Signal:
+    return Signal(
+        market=make_market(market_hash=hash_, event_id=hash_),
+        side=Side.OUTCOME_ONE,
+        action=Action.TAKE_FLOW,
+        maker_odds=from_percent(50.0),
+        reason="take",
+        mid_move_bps=10,
+        imbalance=0.1,
+        confidence=0.5,
+        fair_odds=from_percent(50.0),
+        tracker_odds=from_percent(50.0),
+    )
+
+
+def test_kelly_live_first_fill_is_four_when_grade_is_on() -> None:
+    gate = _kelly_live_gate()
+    assert gate.stake_for(_kelly_on_take()) == to_base_units(4)
+
+
+def test_kelly_live_tops_up_the_extra_three_after_a_one_dollar_fill() -> None:
+    gate = _kelly_live_gate()
+    take = _kelly_on_take()
+    gate.record(take, stake=to_base_units(1))
+    extra = gate.stake_for(take)
+    assert extra == to_base_units(3)
+    assert gate.allow(take, stake=extra) is None
+    assert gate.needs_live_entry(take.market.market_hash) is Side.OUTCOME_ONE
+
+
+def test_kelly_live_does_not_top_up_when_shadow_skips() -> None:
+    gate = _kelly_live_gate()
+    skip = _kelly_skip_take()
+    gate.record(skip, stake=to_base_units(1))
+    assert gate.stake_for(skip) is None
+    assert gate.allow(skip) == "already on this side"
+    assert gate.needs_live_entry(skip.market.market_hash) is Side.OUTCOME_ONE
+
+
+def test_kelly_live_full_four_blocks_another_take() -> None:
+    gate = _kelly_live_gate()
+    take = _kelly_on_take()
+    gate.record(take, stake=to_base_units(4))
+    assert gate.stake_for(take) is None
+    assert gate.allow(take) == "already on this side"
+    assert gate.needs_live_entry(take.market.market_hash) is None
+
+
+def test_hydrate_live_one_dollar_fill_can_still_take_three() -> None:
+    gate = _kelly_live_gate()
+    gate.hydrate(
+        [
+            {
+                "action": "take_flow",
+                "market": "0x1",
+                "side": "outcome_one",
+                "dry_run": False,
+                "live_filled": True,
+                "stake": str(to_base_units(1)),
+            }
+        ]
+    )
+    take = _kelly_on_take()
+    assert gate.exposure.net("0x1") == to_base_units(1)
+    extra = gate.stake_for(take)
+    assert extra == to_base_units(3)
+    assert gate.allow(take, stake=extra) is None
+    assert gate.needs_live_entry("0x1") is Side.OUTCOME_ONE
+
+
 def test_allow_uses_passed_kelly_stake() -> None:
     gate = RiskGate(make_settings(max_per_market_usdc=10, max_exposure_usdc=1000, stake_usdc=5))
     signal = Signal(

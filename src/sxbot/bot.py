@@ -24,7 +24,7 @@ from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_si
 from sxbot.risk import RiskGate
 from sxbot.rollout import uses_v2_books
 from sxbot.strategy import _take_against, evaluate
-from sxbot.units import ODDS_SCALE, OddsLadder, to_percent
+from sxbot.units import ODDS_SCALE, OddsLadder, to_percent, to_usdc
 from sxbot.v2 import books_from_v2_orders, public_trades_from_v2
 from sxbot.wallets import labeled_addresses
 
@@ -241,7 +241,7 @@ class Bot:
         return executed
 
     def _ensure_live_entry(self, market: Market, view: BookView) -> int:
-        """Unique already picked a side: take until SX actually fills."""
+        """Unique already picked a side: take until filled, then Kelly-top to $4."""
         if self.settings.dry_run:
             return 0
         side = self.risk.needs_live_entry(market.market_hash)
@@ -259,32 +259,39 @@ class Bot:
         fair = 0
         if view.mid_one is not None:
             fair = view.mid_one if side is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
-        signal = Signal(
-            market=market,
-            side=side,
-            action=Action.TAKE_FLOW,
-            maker_odds=price,
-            reason="retry unique — chosen side has no live fill",
-            mid_move_bps=0,
-            imbalance=view.imbalance,
-            confidence=1.0,
-            style=style,
-            fair_odds=fair,
-            motive="retry_unfilled",
-            tracker_odds=view.best(side) or price,
-        )
         pending = self.risk.pending_order_ids.get(market.market_hash) or []
-        if pending:
+        topping = self.risk.is_filled(market.market_hash, side)
+        if pending and not topping:
             try:
                 self.client.cancel_orders(pending)
                 log.info("cancelled unfilled offer before retry take %s", market.label)
             except Exception:
                 log.exception("cancel unfilled offer failed %s", market.label)
+        signal = Signal(
+            market=market,
+            side=side,
+            action=Action.TAKE_FLOW,
+            maker_odds=price,
+            reason=(
+                "Kelly still on — take the remaining unique dollars"
+                if topping
+                else "retry unique — chosen side has no live fill"
+            ),
+            mid_move_bps=0,
+            imbalance=view.imbalance,
+            confidence=1.0,
+            style=style,
+            fair_odds=fair,
+            motive="kelly_topup" if topping else "retry_unfilled",
+            tracker_odds=view.best(side) or price,
+        )
         return self._place_unique(signal)
 
     def _place_unique(self, signal: Signal) -> int:
         stake = self.risk.stake_for(signal)
         if stake is None:
+            if self.risk.is_filled(signal.market.market_hash, signal.side):
+                return 0
             log.info(
                 "skip %s %s: no Kelly edge vs fair %.3f%%",
                 signal.action.value,
@@ -300,6 +307,14 @@ class Bot:
         if reason:
             log.info("skip %s %s: %s", signal.action.value, signal.market.label, reason)
             return 0
+        already = self.risk.exposure.net(signal.market.market_hash)
+        if already > 0 and self.risk.is_filled(signal.market.market_hash, signal.side):
+            log.info(
+                "Kelly still on %s — taking extra $%.0f (already $%.0f)",
+                signal.market.label,
+                to_usdc(stake, self.meta.decimals),
+                to_usdc(already, self.meta.decimals),
+            )
         extra = {}
         if signal.action in TAKE_ACTIONS:
             extra = {

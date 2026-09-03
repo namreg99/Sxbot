@@ -5,8 +5,8 @@ from typing import Any
 
 from sxbot.config import Settings
 from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
-from sxbot.kelly import KELLY_ACTIONS, UNIQUE_KELLY_MAX_USDC, sized_take_usdc, tracker_kelly_usdc
-from sxbot.fills import order_ids, row_live_filled
+from sxbot.kelly import KELLY_ACTIONS, sized_take_usdc, tracker_kelly_usdc
+from sxbot.fills import live_filled_base_units, order_ids, row_live_filled
 from sxbot.models import Action, Exposure, Side, Signal
 from sxbot.units import to_base_units
 
@@ -31,39 +31,46 @@ class RiskGate:
         return to_base_units(self.settings.stake_usdc, self.decimals)
 
     def stake_for(self, signal: Signal) -> int | None:
-        """Base-units stake: unique floor, Kelly-scaled cap.
+        """Base-units stake: $1 unique, $4 when paper Kelly would still bet.
 
-        No-edge unique still bets SX_STAKE_USDC. A paper Kelly shadow of $25
-        scales to SX_MAX_PER_MARKET_USDC ($4 on the live smoke).
-        Stale takes (TAKE_STALE) size with Kelly; no edge → skip entirely.
+        If we already filled $1 and Kelly is still on, this returns the extra
+        $3 to match the paper $25 cap. TAKE_STALE with no Kelly edge → skip.
         """
         if signal.action in KELLY_ACTIONS:
             sized = sized_take_usdc(self.settings, signal)
             if sized is None:
                 return None
             return to_base_units(sized, self.decimals)
-        flat = self.stake()
+        floor = self.stake()
+        already = self.exposure.net(signal.market.market_hash)
         if not bool(getattr(self.settings, "kelly_live_cap", False)):
-            return flat
-        # Map the $5/$25 paper Kelly card onto live $1/$4 using the unique
-        # *touch*, not the worse take fill. A $25 paper Kelly shadow → $4.
+            return None if already > 0 else floor
         shadow = tracker_kelly_usdc(signal)
-        if shadow is None or shadow <= 0:
-            return flat
-        cap = float(self.settings.max_per_market_usdc)
-        floor = float(self.settings.stake_usdc)
-        if shadow + 1e-9 >= UNIQUE_KELLY_MAX_USDC:
-            return to_base_units(cap, self.decimals)
-        scale = cap / UNIQUE_KELLY_MAX_USDC if UNIQUE_KELLY_MAX_USDC else 1.0
-        sized = max(floor, min(cap, shadow * scale))
-        return to_base_units(sized, self.decimals)
+        target_usdc = (
+            float(self.settings.max_per_market_usdc)
+            if shadow is not None and shadow > 0
+            else float(self.settings.stake_usdc)
+        )
+        need = to_base_units(target_usdc, self.decimals) - already
+        if need < floor:
+            return None
+        return need
+
+    def _kelly_topup_room(self, market_hash: str) -> bool:
+        """True when a live unique fill is still short of the $4 Kelly cap."""
+        if not bool(getattr(self.settings, "kelly_live_cap", False)):
+            return False
+        already = self.exposure.net(market_hash)
+        target = to_base_units(float(self.settings.max_per_market_usdc), self.decimals)
+        return already > 0 and (target - already) >= self.stake()
 
     def hydrate(self, rows: list[dict[str, Any]], *, now: int | None = None) -> None:
         """Remember market+side already quoted so a restart does not restack.
 
-        Does *not* reload dollar exposure for ordinary styles — session caps
-        still reset. Tennis-dog quotes that are still in their live-exit
-        window are restored onto the cap so we keep watching after kickoff.
+        Live unique fills restore their matched dollars so a $1 fill can still
+        take the extra $3 when Kelly is on. Tennis-dog quotes that are still
+        in their live-exit window are restored onto the cap so we keep watching
+        after kickoff. Other session caps still reset.
         """
         now = int(now if now is not None else time.time())
         last: dict[tuple[str, str], dict[str, Any]] = {}
@@ -72,6 +79,33 @@ class RiskGate:
             side = str(row.get("side") or "")
             if market and side:
                 last[(market, side)] = row
+        cancelled = {
+            market
+            for (market, _side), row in last.items()
+            if str(row.get("action") or "") == Action.CANCEL.value
+        }
+        if not self.settings.dry_run:
+            for row in rows:
+                action = str(row.get("action") or "")
+                if action not in {a.value for a in _TRADE_ACTIONS}:
+                    continue
+                style = str(row.get("style") or "")
+                if style in (STYLE_MM, STYLE_TENNIS_DOG):
+                    continue
+                if not row_live_filled(row):
+                    continue
+                market = str(row.get("market") or "")
+                side = str(row.get("side") or "")
+                if not market or not side or market in cancelled:
+                    continue
+                try:
+                    side_enum = Side(side)
+                except ValueError:
+                    continue
+                amount = _row_fill_units(row)
+                if amount > 0:
+                    self.exposure.add(market, side_enum, amount)
+                    self.quoted.add(market)
         grace = float(self.settings.tennis_dog_live_hours or 0) * 3600.0
         for (market, side), row in last.items():
             action = str(row.get("action") or "")
@@ -83,6 +117,10 @@ class RiskGate:
             filled = bool(self.settings.dry_run) or row_live_filled(row)
             if filled:
                 self.joined_sides.add((market, side))
+                kickoff = int(row.get("game_time") or 0)
+                if not self.settings.dry_run and market in self.quoted:
+                    self.quoted_at.setdefault(market, float(row.get("ts") or now))
+                    self.quoted_kickoff.setdefault(market, kickoff)
             else:
                 oids = order_ids(row.get("result"))
                 if oids:
@@ -154,7 +192,9 @@ class RiskGate:
             return "max per-market exposure"
         key = (market_hash, signal.side.value)
         if key in self.joined_sides:
-            return "already on this side"
+            extra = self.stake_for(signal)
+            if extra is None or not self._kelly_topup_room(market_hash):
+                return "already on this side"
         if self.settings.one_side_per_market and any(
             item[0] == market_hash and item != key for item in (self.joined_sides | self.chosen_sides)
         ):
@@ -183,9 +223,13 @@ class RiskGate:
 
     def needs_live_entry(self, market_hash: str) -> Side | None:
         side = self.chosen_side(market_hash)
-        if side is None or self.is_filled(market_hash, side):
+        if side is None:
             return None
-        return side
+        if not self.is_filled(market_hash, side):
+            return side
+        if self._kelly_topup_room(market_hash):
+            return side
+        return None
 
     def mark_chosen(self, signal: Signal) -> None:
         market_hash = signal.market.market_hash
@@ -268,3 +312,13 @@ class RiskGate:
                 self._drop_slot(market_hash)
                 released.append(market_hash)
         return released
+
+
+def _row_fill_units(row: dict[str, Any]) -> int:
+    raw = row.get("stake")
+    try:
+        stake = int(str(raw).replace(",", "").strip()) if raw not in (None, "") else 0
+    except (TypeError, ValueError):
+        stake = 0
+    filled = live_filled_base_units(row.get("result"), stake or None)
+    return filled if filled > 0 else stake
