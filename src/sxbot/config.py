@@ -104,6 +104,7 @@ class Settings:
     tennis_dog_live_hours: float = 5.0
     # Quote styles to never join/take. Example: tennis_dog on a $1 live smoke.
     skip_styles: tuple[str, ...] = ()
+    kelly_live_cap: bool = False
     board_host: str = "127.0.0.1"
     board_port: int = 8765
     board_refresh_seconds: int = 20
@@ -186,6 +187,7 @@ class Settings:
             flicker_bps=int(os.getenv("SX_FLICKER_BPS", "800")),
             tennis_dog_live_hours=float(os.getenv("SX_TENNIS_DOG_LIVE_HOURS", "5")),
             skip_styles=_strs("SX_SKIP_STYLES"),
+            kelly_live_cap=_bool("SX_KELLY_LIVE_CAP", False),
             board_host=os.getenv("SX_BOARD_HOST", "127.0.0.1").strip() or "127.0.0.1",
             board_port=int(os.getenv("SX_BOARD_PORT", "8765")),
             board_refresh_seconds=int(os.getenv("SX_BOARD_REFRESH_SECONDS", "20")),

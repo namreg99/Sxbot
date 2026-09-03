@@ -28,17 +28,35 @@ class RiskGate:
         return to_base_units(self.settings.stake_usdc, self.decimals)
 
     def stake_for(self, signal: Signal) -> int | None:
-        """Base-units stake, or None to skip a no-edge stale take.
+        """Base-units stake: flat floor, Kelly cap when there is edge.
 
-        Steam takes (TAKE_FLOW, same team as the makers) are always the
-        flat $5. Kelly is only for leftover crossed quotes (TAKE_STALE).
+        Joins use flat $SX_STAKE_USDC as the floor. When Kelly says bet more,
+        the live size rises to min(kelly, SX_MAX_PER_MARKET_USDC) — but never
+        below the flat floor. Kelly skip (no edge) still executes at the flat.
+        Stale takes (TAKE_STALE) size with Kelly; no edge → skip entirely.
         """
-        if signal.action not in KELLY_ACTIONS:
-            return self.stake()
-        sized = sized_take_usdc(self.settings, signal)
-        if sized is None:
-            return None
-        return to_base_units(sized, self.decimals)
+        if signal.action in KELLY_ACTIONS:
+            sized = sized_take_usdc(self.settings, signal)
+            if sized is None:
+                return None
+            return to_base_units(sized, self.decimals)
+        flat = self.stake()
+        if not bool(getattr(self.settings, "kelly_live_cap", False)):
+            return flat
+        from sxbot.kelly import fair_prob, kelly_stake_usdc
+        from sxbot.units import decimal_odds, to_prob
+        p = fair_prob(signal)
+        if p is None:
+            return flat
+        kelly = kelly_stake_usdc(
+            self.settings,
+            p=p,
+            decimal=decimal_odds(to_prob(signal.maker_odds)),
+        )
+        if kelly is None or kelly <= 0:
+            return flat
+        sized = to_base_units(kelly, self.decimals)
+        return max(sized, flat)
 
     def hydrate(self, rows: list[dict[str, Any]], *, now: int | None = None) -> None:
         """Remember market+side already quoted so a restart does not restack.
