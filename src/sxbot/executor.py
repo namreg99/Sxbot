@@ -117,17 +117,17 @@ class Executor:
 
     def _sign_order(self, signal: Signal, stake: int, time_in_force: str) -> dict[str, Any]:
         from eth_account.messages import encode_typed_data
-        from eth_utils import keccak
 
         account = self._account
         salt = "0x" + secrets.token_hex(32)
+        expiry = int(time.time()) + 3600
         unsigned = {
             "marketHash": signal.market.market_hash,
             "baseToken": self.meta.base_token,
             "totalBetSize": str(stake),
             "percentageOdds": str(signal.maker_odds),
             "salt": salt,
-            "expiry": 0,
+            "expiry": expiry,
             "maker": account.address,
             "isMakerBettingOutcomeOne": signal.side.is_outcome_one,
         }
@@ -139,14 +139,12 @@ class Executor:
         }
         signable = encode_typed_data(self.meta.domain, ORDER_TYPES, message)
         signed = account.sign_message(signable)
-        digest = "0x" + keccak(b"\x19" + signable.version + signable.header + signable.body).hex()
         client_order_id = f"sxbot-{signal.market.market_hash[2:10]}-{signal.side.value[:3]}-{int(time.time())}"
         return {
             **unsigned,
             "timeInForce": time_in_force,
             "orderSignature": signed.signature.to_0x_hex(),
             "clientOrderId": client_order_id[:64],
-            "_digest": digest,
         }
 
     def _stamp_books(self, record: dict[str, Any], signal: Signal) -> None:

@@ -136,7 +136,7 @@ class Settings:
             # Real books are on mainnet. Before the V3 cutover the bot aggregates
             # V2 GET /orders into the same Book the V3 classifier uses.
             api_base=os.getenv("SX_API_BASE", MAINNET_API).rstrip("/"),
-            api_key=os.getenv("SX_API_KEY") or None,
+            api_key=(os.getenv("SX_API_KEY") or "").strip().strip("\"'") or None,
             private_key=os.getenv("SX_PRIVATE_KEY") or None,
             dry_run=_bool("SX_DRY_RUN", True),
             stake_usdc=float(os.getenv("SX_STAKE_USDC", "5")),

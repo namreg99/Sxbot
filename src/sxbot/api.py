@@ -324,9 +324,13 @@ class SxClient:
         return out
 
     def create_orders(self, orders: list[dict[str, Any]], *, wait: bool = True) -> dict[str, Any]:
+        payload = [
+            {key: value for key, value in order.items() if not str(key).startswith("_")}
+            for order in orders
+        ]
         response = self._http.post(
             "/orders-v3",
-            json={"orders": orders, "waitForOutcome": wait},
+            json={"orders": payload, "waitForOutcome": wait},
         )
         return self._parse(response)
 
