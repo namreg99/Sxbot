@@ -50,6 +50,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     run = sub.add_parser("run", help="Paper or live trading loop (dry-run unless SX_DRY_RUN=false)")
     run.add_argument("--once", action="store_true", help="Two polls then exit")
+    live_ping = sub.add_parser(
+        "live-ping",
+        help="Post one signed 1 USDC FOK (far from the touch) and print SX's reply",
+    )
+    live_ping.add_argument(
+        "--yes",
+        action="store_true",
+        help="Required. Sends a real signed 1 USDC order. Unlikely to fill; cancel if it rests.",
+    )
     sub.add_parser("summary", help="Print recorded flow + paper-trade logs")
     sub.add_parser(
         "grade",
@@ -135,6 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if args.cmd == "doctor":
                 return cmd_doctor(client, settings)
+            if args.cmd == "live-ping":
+                return cmd_live_ping(client, settings, args)
             if args.cmd == "grade":
                 return cmd_grade(client, settings)
             if args.cmd == "sharp":
@@ -253,6 +264,89 @@ def cmd_doctor(client: SxClient, settings: Settings) -> int:
         print(f"public tape   {len(trades)} recent trades")
     except SxApiError as exc:
         print(f"public tape   FAILED ({exc.status})")
+    return 0
+
+
+def cmd_live_ping(client: SxClient, settings: Settings, args: argparse.Namespace) -> int:
+    """One signed 1 USDC FOK, priced off the touch so it should not fill."""
+    from dataclasses import replace
+
+    from sxbot.executor import Executor
+    from sxbot.models import Action, Side, Signal
+    from sxbot.units import OddsLadder, to_percent
+
+    if not args.yes:
+        print("Refusing: pass --yes to send a real signed 1 USDC order.")
+        print("This is a POST /orders-v3 probe. It can 403 on datacenter IPs without spending.")
+        return 2
+    if not settings.api_key or not settings.private_key:
+        print("Need SX_API_KEY and SX_PRIVATE_KEY in .env")
+        return 2
+
+    live_settings = replace(settings, dry_run=False)
+    meta = client.metadata()
+    executor = Executor(live_settings, meta, client)
+    ladder = OddsLadder(meta.odds_ladder_step_size)
+    stake = max(meta.min_order, 1_000_000)
+
+    market = None
+    price = 0
+    for candidate in client.active_markets(
+        only_main_line=True,
+        sport_ids=settings.sport_ids or (6, 3, 5),
+        page_size=20,
+        limit=40,
+    ):
+        if candidate.game_time and candidate.game_time <= int(time.time()):
+            continue
+        try:
+            book = client.snapshot(candidate.market_hash)
+        except SxApiError:
+            continue
+        best = book.outcome_one[0].percentage_odds if book.outcome_one else 0
+        if best <= 0:
+            continue
+        price = ladder.tick_down(best, 12)
+        if price <= 0:
+            continue
+        market = candidate
+        break
+    if market is None or price <= 0:
+        print("No pregame book to probe")
+        return 2
+
+    signal = Signal(
+        market=market,
+        side=Side.OUTCOME_ONE,
+        action=Action.TAKE_FLOW,
+        maker_odds=price,
+        reason="1 USDC live-ping",
+        mid_move_bps=0,
+        imbalance=0.0,
+        confidence=0.0,
+    )
+    order = executor._sign_order(signal, stake, "FOK")
+    print(f"market   {market.label}")
+    print(f"side     {market.outcome_one}")
+    print("size     1 USDC")
+    print(f"odds     {to_percent(price):.3f}% implied (12 ticks behind touch, FOK)")
+    print("posting  POST /orders-v3 …")
+    try:
+        result = client.create_orders([order], wait=True)
+    except SxApiError as exc:
+        print(f"HTTP     {exc.status}")
+        print(f"url      {exc.url}")
+        print(f"body     {exc.body[:500]}")
+        if exc.status == 403:
+            print("SX refused the signed $1 order from this IP. Same as the empty POST.")
+        return 1
+    print("HTTP     200")
+    print(f"result   {result}")
+    try:
+        client.cancel_all()
+        print("cancel   DELETE /orders-v3/all ok")
+    except SxApiError as exc:
+        print(f"cancel   HTTP {exc.status} {exc.body[:200]}")
     return 0
 
 
