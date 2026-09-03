@@ -96,6 +96,34 @@ def test_dry_run_stamps_flat_and_kelly_books(tmp_path) -> None:
     assert skipped["flat_stake_usdc"] == 5.0
 
 
+def test_tracker_stamps_ignore_live_dollar_caps(tmp_path) -> None:
+    paper = tmp_path / "paper.jsonl"
+    settings = make_settings(
+        paper_log=str(paper),
+        stake_usdc=1,
+        max_per_market_usdc=4,
+        bankroll_usdc=145,
+    )
+    executor = Executor(settings, _meta(), client=None, paper_path=paper)
+    signal = Signal(
+        market=make_market(),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=from_percent(50.0),
+        reason="makers shifted",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(55.0),
+        style="mlb",
+    )
+    record = executor.execute(signal, 1_000_000)
+    assert record["stake_usdc"] == 1.0
+    assert record["flat_stake_usdc"] == 5.0
+    assert record["kelly_stake_usdc"] == 25.0
+    assert record["bankroll_usdc"] == 1000.0
+
+
 def _meta() -> ExchangeMeta:
     return ExchangeMeta(
         chain_id=4162,

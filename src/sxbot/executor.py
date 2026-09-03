@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Any
 
 from sxbot.config import Settings
-from sxbot.journal import paper_log_for
-from sxbot.kelly import shadow_kelly_usdc
+from sxbot.journal import live_log_for, paper_log_for
+from sxbot.kelly import UNIQUE_BANKROLL_USDC, UNIQUE_FLAT_USDC, UNIQUE_KELLY_FRACTION, tracker_kelly_usdc
 from sxbot.models import Action, ExchangeMeta, Signal
 from sxbot.units import to_percent, to_usdc
 
@@ -180,21 +180,24 @@ class Executor:
         }
 
     def _stamp_books(self, record: dict[str, Any], signal: Signal) -> None:
-        """Keep a $5 flat book and a ⅝-Kelly shadow on every paper row."""
-        record["flat_stake_usdc"] = float(self.settings.stake_usdc)
-        record["bankroll_usdc"] = float(self.settings.bankroll_usdc)
-        record["kelly_fraction"] = float(self.settings.kelly_fraction)
+        """$5 unique follow + ⅝-Kelly/$25 shadow, even when live size is $1–$4."""
+        record["flat_stake_usdc"] = UNIQUE_FLAT_USDC
+        record["bankroll_usdc"] = UNIQUE_BANKROLL_USDC
+        record["kelly_fraction"] = UNIQUE_KELLY_FRACTION
         if signal.fair_odds:
             record["fair_pct"] = to_percent(signal.fair_odds)
         else:
             record.setdefault("fair_pct", None)
-        record["kelly_stake_usdc"] = shadow_kelly_usdc(self.settings, signal)
+        record["kelly_stake_usdc"] = tracker_kelly_usdc(signal)
 
     def _append(self, record: dict[str, Any], signal: Signal | None = None) -> None:
         path = self.paper_path
         if not self._paper_path_locked:
             style = (signal.style if signal is not None else "") or "legacy"
-            path = paper_log_for(self.paper_path, style)
+            if self.settings.dry_run:
+                path = paper_log_for(self.paper_path, style)
+            else:
+                path = live_log_for(self.paper_path, style)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record) + "\n")

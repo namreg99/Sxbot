@@ -1,4 +1,11 @@
-from sxbot.journal import format_summary, iter_paper_logs, load_follow_paper, load_jsonl
+from sxbot.journal import (
+    format_summary,
+    iter_paper_logs,
+    live_log_for,
+    load_follow_live,
+    load_follow_paper,
+    load_jsonl,
+)
 
 
 def test_summary_empty(tmp_path) -> None:
@@ -71,3 +78,20 @@ def test_follow_paper_drops_mm_quotes(tmp_path) -> None:
     rows = load_follow_paper(paper)
     assert len(rows) == 1
     assert rows[0]["style"] == "mlb"
+
+
+def test_live_log_stays_off_the_paper_card(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    mlb = tmp_path / "sxbot-paper-mlb.jsonl"
+    live = tmp_path / "sxbot-live-mlb.jsonl"
+    mlb.write_text(
+        '{"action":"join_maker","style":"mlb","market":"0x1","side":"outcome_one","ts":1}\n',
+        encoding="utf-8",
+    )
+    live.write_text(
+        '{"action":"join_maker","style":"mlb","market":"0x9","side":"outcome_one","ts":2}\n',
+        encoding="utf-8",
+    )
+    assert live_log_for(paper, "mlb") == live
+    assert [r["market"] for r in load_follow_paper(paper)] == ["0x1"]
+    assert [r["market"] for r in load_follow_live(paper)] == ["0x9"]

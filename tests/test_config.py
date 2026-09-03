@@ -1,4 +1,5 @@
 from sxbot.config import Settings
+import os
 
 
 def test_load_enables_tob_lag_joins_by_default(monkeypatch) -> None:
@@ -28,7 +29,14 @@ def test_load_skip_styles(monkeypatch) -> None:
 
 
 def test_load_dry_run_strips_null_bytes(monkeypatch) -> None:
-    monkeypatch.setenv("SX_DRY_RUN", "false\x00")
     monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
+    real_getenv = os.getenv
+
+    def getenv(name: str, default=None):
+        if name == "SX_DRY_RUN":
+            return "false\x00"
+        return real_getenv(name, default)
+
+    monkeypatch.setattr("sxbot.config.os.getenv", getenv)
     settings = Settings.load()
     assert settings.dry_run is False

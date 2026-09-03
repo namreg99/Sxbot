@@ -33,6 +33,15 @@ def paper_log_for(path: str | Path, style: str) -> Path:
     return file.with_name(f"{file.stem}-{style}{file.suffix}")
 
 
+def live_log_for(path: str | Path, style: str) -> Path:
+    """Real-money unique log. Kept apart from the $5 paper card."""
+    paper = paper_log_for(path, style)
+    name = paper.name.replace("sxbot-paper", "sxbot-live", 1)
+    if name == paper.name:
+        name = f"sxbot-live{'-' + style if style else ''}{paper.suffix}"
+    return paper.with_name(name)
+
+
 # History rescued from process logs after a file was deleted (Aug 21-24 book).
 RECOVERED_STYLE = "recovered"
 
@@ -73,6 +82,35 @@ def load_all_paper(path: str | Path) -> list[dict[str, Any]]:
 def load_follow_paper(path: str | Path) -> list[dict[str, Any]]:
     """`sxbot run` hydrate: style logs minus the MM ghost book."""
     return [row for row in load_all_paper(path) if str(row.get("style") or "") != STYLE_MM]
+
+
+def iter_live_logs(path: str | Path) -> list[Path]:
+    file = Path(path)
+    candidates = [live_log_for(file, "")]
+    candidates.extend(live_log_for(file, style) for style in QUOTE_STYLES)
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in candidates:
+        if not candidate.exists():
+            continue
+        key = candidate.resolve()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+    return out
+
+
+def load_all_live(path: str | Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for log in iter_live_logs(path):
+        rows.extend(load_jsonl(log))
+    rows.sort(key=lambda row: float(row.get("ts") or 0))
+    return rows
+
+
+def load_follow_live(path: str | Path) -> list[dict[str, Any]]:
+    return [row for row in load_all_live(path) if str(row.get("style") or "") != STYLE_MM]
 
 
 def _count(rows: list[dict[str, Any]], key: str) -> Counter[str]:

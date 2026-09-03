@@ -23,7 +23,7 @@ from sxbot.config import Settings
 from sxbot.fingerprint import trade_pnl_usdc
 from sxbot.filters import STYLE_MM
 from sxbot.grade import _picked_name, grade_row, opposite_side
-from sxbot.journal import load_all_paper, load_jsonl
+from sxbot.journal import load_all_live, load_all_paper, load_jsonl
 from sxbot.kelly import shadow_kelly_from_row
 from sxbot.units import complement_decimal, decimal_odds, to_percent, to_prob
 from sxbot.wallets import CANDIDATE_WALLETS, KNOWN_WALLETS, labeled_addresses
@@ -547,12 +547,15 @@ def build_snapshot(
         dict.fromkeys(str(r.get("marketHash") or "") for r in tape_rows if r.get("marketHash"))
     )
     paper_rows = load_all_paper(settings.paper_log)
+    live_rows = load_all_live(settings.paper_log)
     paper_hashes = list(
         dict.fromkeys(str(r.get("market") or "") for r in paper_rows if r.get("market"))
     )
-    found = client.find_markets(hashes + [h for h in paper_hashes if h not in hashes]) if (
-        hashes or paper_hashes
-    ) else []
+    live_hashes = list(
+        dict.fromkeys(str(r.get("market") or "") for r in live_rows if r.get("market"))
+    )
+    extra_hashes = [h for h in paper_hashes + live_hashes if h not in hashes]
+    found = client.find_markets(hashes + extra_hashes) if (hashes or extra_hashes) else []
     markets = index_markets(found)
 
     fills = [_fill_view(raw, lookup_market(markets, str(raw.get("marketHash") or "")), who) for raw in tape_rows]
@@ -589,6 +592,9 @@ def build_snapshot(
     mm_bets = by_style.get(STYLE_MM) or []
     mm_record = paper_record(mm_bets)
     record = paper_record(life_bets)
+    live_life = [_view_row(row) for row in unique_lifetime_rows(live_rows)]
+    live_follow = [b for b in live_life if str(b.get("style") or "") != STYLE_MM]
+    live_record = paper_record(live_follow)
     return {
         "generated_at": _utc(now_ts),
         "generated_ts": now_ts,
@@ -601,6 +607,7 @@ def build_snapshot(
         "best_open": best_open,
         "record": record,
         "follow_record": follow_record,
+        "live_record": live_record,
         "mm_record": mm_record,
         "follow_clv": clv_record(follow_bets),
         "best_priced": {
@@ -781,7 +788,8 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
   <div class="kpi"><b>follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced"), books=True))}</div>
   <div class="kpi"><b>follow maker EV (steam / parked size)</b>{html.escape(rec(snap.get("maker_ev"), books=True))}</div>
   <div class="kpi"><b>follow short + EV</b>{html.escape(rec(snap.get("priced_ev"), books=True))}</div>
-  <div class="kpi"><b>taker bot unique (`sxbot run`)</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
+  <div class="kpi"><b>taker bot unique (`sxbot run`) $5 / Kelly $25</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
+  <div class="kpi"><b>live unique $1–$4 (new book)</b>{html.escape(rec(snap.get("live_record"), books=True))}</div>
   <div class="kpi"><b>maker bot unique (`sxbot mm`)</b>{html.escape(rec(snap.get("mm_record"), books=True))}</div>
   <div class="kpi"><b>combined unique (gate only — do not mix ROI)</b>{html.escape(rec(snap.get("record"), books=True))}</div>
   <div class="kpi"><b>taker CLV (price vs closing line)</b>{html.escape(clv_s(snap.get("follow_clv")))}</div>
@@ -861,7 +869,8 @@ def render_text(snap: dict[str, Any]) -> str:
         rec(snap.get("best_priced"), f"follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}", books=True),
         rec(snap.get("maker_ev"), "follow maker EV", books=True),
         rec(snap.get("priced_ev"), "follow short + EV", books=True),
-        rec(snap.get("follow_record"), "taker bot unique (sxbot run)", books=True),
+        rec(snap.get("follow_record"), "taker bot unique $5 / Kelly $25 (sxbot run)", books=True),
+        rec(snap.get("live_record"), "live unique $1-$4 (new book)", books=True),
         rec(snap.get("mm_record"), "maker bot unique (sxbot mm)", books=True),
         rec(snap.get("record"), "combined unique (gate only)", books=True),
         clv_line,

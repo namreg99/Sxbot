@@ -16,7 +16,7 @@ from sxbot.executor import Executor
 from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, quote_family
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
 from sxbot.kelly import TAKE_ACTIONS
-from sxbot.journal import load_follow_paper
+from sxbot.journal import load_follow_live, load_follow_paper
 from sxbot.models import Action, Book, Market, PublicTrade, Side, Signal
 from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
@@ -51,7 +51,10 @@ class Bot:
         # the closes log at kickoff so every card can be graded vs the close.
         self._pregame_mid: dict[str, tuple[float, int]] = {}
         self._closed: set[str] = self._hydrate_closes()
-        self.risk.hydrate(load_follow_paper(settings.paper_log))
+        if settings.dry_run:
+            self.risk.hydrate(load_follow_paper(settings.paper_log))
+        else:
+            self.risk.hydrate(load_follow_live(settings.paper_log))
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
         now = int(time.time())

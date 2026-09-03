@@ -25,6 +25,13 @@ KELLY_ACTIONS = {Action.TAKE_STALE}
 TRADE_ACTIONS = {Action.JOIN_MAKER, Action.TAKE_STALE, Action.TAKE_FLOW, Action.MM_FILL}
 _TRADE_ACTION_VALUES = {action.value for action in TRADE_ACTIONS}
 
+# Paper unique / Kelly-shadow tracker. Live $1/$4 size does not change these.
+UNIQUE_FLAT_USDC = 5.0
+UNIQUE_KELLY_MAX_USDC = 25.0
+UNIQUE_BANKROLL_USDC = 1000.0
+UNIQUE_KELLY_FRACTION = 0.625
+UNIQUE_KELLY_MAX_FRAC = 0.05
+
 
 def full_kelly(p: float, decimal: float) -> float:
     """Share of bankroll to bet at decimal odds `decimal` with win prob `p`."""
@@ -115,6 +122,24 @@ def shadow_kelly_usdc(settings: object, signal: Signal) -> float | None:
         settings,
         p=p,
         decimal=decimal_odds(to_prob(signal.maker_odds)),
+    )
+
+
+def tracker_kelly_usdc(signal: Signal) -> float | None:
+    """⅝ Kelly on the $1000 / $25 paper card, ignoring live stake caps."""
+    if signal.action not in TRADE_ACTIONS:
+        return None
+    p = fair_prob(signal)
+    if p is None:
+        return None
+    return take_stake_usdc(
+        p=p,
+        decimal=decimal_odds(to_prob(signal.maker_odds)),
+        bankroll=UNIQUE_BANKROLL_USDC,
+        fraction=UNIQUE_KELLY_FRACTION,
+        min_usdc=UNIQUE_FLAT_USDC,
+        max_usdc=UNIQUE_KELLY_MAX_USDC,
+        max_frac=UNIQUE_KELLY_MAX_FRAC,
     )
 
 
