@@ -5,10 +5,13 @@ import logging
 import sys
 import time
 
+from dataclasses import replace
+
 from sxbot.api import SxApiError, SxClient, index_markets
 from sxbot.board import build_snapshot, render_text, serve_board
 from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
+from sxbot.filters import STYLE_TENNIS_DOG
 from sxbot.flow import Motive
 from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
@@ -18,6 +21,26 @@ from sxbot.rollout import V3_MAINNET_LIVE_AT, uses_v2_books, v3_mainnet_is_live
 from sxbot.scoreboard import format_scoreboard, grade_flow
 from sxbot.strategy import evaluate
 from sxbot.v2 import book_from_v2_orders
+
+
+def apply_live_run(settings: Settings) -> Settings:
+    """Laptop live unique: take_first, same tennis-dog book as paper.
+
+    Older live smokes set SX_SKIP_STYLES=tennis_dog. Unique follow still
+    extracts that band (paper tennis_dog is green). --live turns the skip off.
+    """
+    keep = tuple(
+        style
+        for style in settings.skip_styles
+        if str(style).strip().lower() != STYLE_TENNIS_DOG
+    )
+    return replace(
+        settings,
+        dry_run=False,
+        follow_style="take_first",
+        enable_take_stale=True,
+        skip_styles=keep,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -132,17 +155,11 @@ def main(argv: list[str] | None = None) -> int:
     logging.getLogger("httpcore").setLevel(logging.WARNING)
     settings = Settings.load()
     if args.cmd == "run" and args.live:
-        from dataclasses import replace
-
-        settings = replace(
-            settings,
-            dry_run=False,
-            follow_style="take_first",
-            enable_take_stale=True,
-        )
+        settings = apply_live_run(settings)
         print(
-            "LIVE take_first: same unique-follow team, HIT the other side (IOC). "
-            "Takes do not sit on SX as offers. This mode does not post resting joins.",
+            "LIVE take_first: same unique-follow team (including tennis dogs), "
+            "HIT the other side (IOC). Takes do not sit on SX as offers. "
+            "This mode does not post resting joins.",
             flush=True,
         )
     if args.cmd == "summary":

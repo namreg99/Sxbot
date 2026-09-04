@@ -28,6 +28,19 @@ def test_load_skip_styles(monkeypatch) -> None:
     assert settings.skip_styles == ("tennis_dog", "mlb")
 
 
+def test_live_run_keeps_tennis_dog_unique() -> None:
+    from sxbot.cli import apply_live_run
+    from tests.conftest import make_settings
+
+    skipped = make_settings(skip_styles=("tennis_dog", "mlb"), dry_run=True, follow_style="join")
+    live = apply_live_run(skipped)
+    assert live.dry_run is False
+    assert live.follow_style == "take_first"
+    assert live.enable_take_stale is True
+    assert "tennis_dog" not in live.skip_styles
+    assert live.skip_styles == ("mlb",)
+
+
 def test_load_dry_run_strips_null_bytes(monkeypatch) -> None:
     monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
     real_getenv = os.getenv

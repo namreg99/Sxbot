@@ -106,7 +106,8 @@ class Settings:
     min_persistence: float = 0.01
     flicker_bps: int = 800
     tennis_dog_live_hours: float = 5.0
-    # Quote styles to never join/take. Example: tennis_dog on a $1 live smoke.
+    # Quote styles to never join/take. Live unique includes tennis_dog;
+    # `sxbot run --live` strips tennis_dog from this list if it is set.
     skip_styles: tuple[str, ...] = ()
     kelly_live_cap: bool = False
     board_host: str = "127.0.0.1"

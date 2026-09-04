@@ -211,7 +211,7 @@ Botswana-style steam takes (`SX_FOLLOW_STYLE=take`) execute at a flat $5 on the 
 
 **Live-test gate:** after **100 unique settled** paper trades (follow + MM), the board flags `ready` only if **both** books are profitable. That flag is a tracker, not a deploy.
 
-**$200 CAD / ~145 USDC smoke (Linode only):** paste `live-test.env.example` into the VPS `.env`. Flat **1 USDC** (the live min), 4 open max, skip `tennis_dog`, pregame only, no maker bot, no Kelly size. Convert CAD → USDC and fund the SX **proxy**, not the EOA. Keep `SX_DRY_RUN=true` until keys + `pip install -e ".[trade]"` + `sxbot doctor` look right, then type `SX_DRY_RUN=false` yourself on that box. Never put `SX_PRIVATE_KEY` in git or on this cloud agent.
+**$200 CAD / ~145 USDC smoke (laptop, not Linode):** paste `live-test.env.example` into `.env`. Unique follow at **$1 floor / $4 Kelly cap**, pregame only, no maker bot. Tennis dogs stay in the book (same 2.20–3.50 unique as paper). Convert CAD → USDC and fund the SX **proxy**, not the EOA. `python -m sxbot run --live` from the laptop. Never put `SX_PRIVATE_KEY` in git or on this cloud agent.
 
 A ~150k-fill sample (Dec/Jan + Jun + late July, including tennis) is what `sxbot profiles` is for. In that sample: **BotswanaMC** is the only labeled wallet with large **net** P&L, mostly pregame soccer and NFL at pick’em prices (1.80–2.20). **GambleGuruGary** prints millions of gross “Won” and is still **net negative** — the 1.13 hammer is a weapon, not the book. **Tennis lost money** for both takers. **cypherprod** is mixed maker/taker and the only one who is net-positive *live*. **HedgeHog** is the two-sided MM (`SX_MM_TWO_SIDED=true`). Default `sxbot mm` is one-sided extract, not that book. Do not clone all four as one bot.
 

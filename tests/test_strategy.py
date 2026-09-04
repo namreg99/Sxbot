@@ -323,6 +323,32 @@ def test_tennis_dog_joins_in_band() -> None:
     assert signals[0].style == "tennis_dog"
 
 
+def test_take_first_takes_tennis_dog_steam() -> None:
+    """Same unique-follow dog as paper — IOC take, do not skip the 2.20–3.50 band."""
+    prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
+    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    market = make_market(
+        type=3,
+        sport_id=6,
+        sport_label="Tennis",
+        league_id=2,
+        league_label="ATP",
+        outcome_one="Player A",
+        outcome_two="Player B",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="take_first"),
+        OddsLadder(125),
+    )
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].style == "tennis_dog"
+    assert signals[0].side is Side.OUTCOME_ONE
+
+
 def test_soccer_type1_joins_favorite_band() -> None:
     prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
     curr = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="2")
