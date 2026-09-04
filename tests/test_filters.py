@@ -1,4 +1,5 @@
 from sxbot.filters import (
+    bare_team_name,
     kickoff_skip_reason,
     longshot_skip_reason,
     mm_family,
@@ -6,7 +7,9 @@ from sxbot.filters import (
     order_skip_reason,
     quote_family,
     quote_style,
+    soccer_team_lock_token,
 )
+from sxbot.models import Side
 from sxbot.units import from_percent
 from tests.conftest import make_market, make_settings
 
@@ -108,3 +111,35 @@ def test_mm_quote_style_skips_pickem_and_nfl() -> None:
     )
     assert mm_quote_style(spread, from_percent(70.0)) == "mlb"
     assert mm_quote_style(spread, from_percent(52.0)) is None
+
+
+def test_soccer_team_lock_treats_not_team_as_the_same_team() -> None:
+    assert bare_team_name("Not Nautico Capibaribe") == bare_team_name("Nautico Capibaribe")
+    kick = 1_700_000_000
+    vs = make_market(
+        market_hash="0x52",
+        event_id="L1",
+        sport_id=5,
+        sport_label="Soccer",
+        type=52,
+        league_id=99,
+        league_label="Brasileiro Serie B",
+        outcome_one="Nautico Capibaribe",
+        outcome_two="Botafogo SP",
+        game_time=kick,
+    )
+    not_team = make_market(
+        market_hash="0x01",
+        event_id="L2",
+        sport_id=5,
+        sport_label="Soccer",
+        type=1,
+        league_id=99,
+        league_label="Brasileiro Serie B",
+        outcome_one="Nautico Capibaribe",
+        outcome_two="Not Nautico Capibaribe",
+        game_time=kick,
+    )
+    assert soccer_team_lock_token(vs, Side.OUTCOME_ONE) == soccer_team_lock_token(
+        not_team, Side.OUTCOME_TWO
+    )

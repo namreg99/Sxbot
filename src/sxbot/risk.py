@@ -4,7 +4,7 @@ import time
 from typing import Any
 
 from sxbot.config import Settings
-from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
+from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG, soccer_team_lock_token, soccer_team_lock_token_from_row
 from sxbot.kelly import KELLY_ACTIONS, sized_take_usdc, tracker_kelly_usdc
 from sxbot.fills import live_filled_base_units, order_ids, row_live_filled
 from sxbot.models import Action, Exposure, Side, Signal
@@ -26,6 +26,8 @@ class RiskGate:
         self.quoted_kickoff: dict[str, int] = {}
         self.quoted_style: dict[str, str] = {}
         self.event_markets: dict[str, set[str]] = {}
+        self.locked_teams: set[tuple[str, ...]] = set()
+        self.market_team_tokens: dict[str, tuple[str, ...]] = {}
 
     def stake(self) -> int:
         return to_base_units(self.settings.stake_usdc, self.decimals)
@@ -114,6 +116,12 @@ class RiskGate:
             if action not in {a.value for a in _TRADE_ACTIONS}:
                 continue
             self.chosen_sides.add((market, side))
+            try:
+                side_enum = Side(side)
+            except ValueError:
+                side_enum = None
+            if side_enum is not None:
+                self._add_team_lock(market, soccer_team_lock_token_from_row(row))
             filled = bool(self.settings.dry_run) or row_live_filled(row)
             if filled:
                 self.joined_sides.add((market, side))
@@ -207,7 +215,25 @@ class RiskGate:
             and market_hash not in self.event_markets[event_id]
         ):
             return "already in this event"
+        token = soccer_team_lock_token(signal.market, signal.side)
+        if (
+            self.settings.one_side_per_event
+            and token
+            and token in self.locked_teams
+            and all(item[0] != market_hash for item in self.chosen_sides)
+        ):
+            return "already on this team"
         return None
+
+    def _add_team_lock(self, market_hash: str, token: tuple[str, ...] | None) -> None:
+        if not token:
+            return
+        self.market_team_tokens[market_hash] = token
+        self.locked_teams.add(token)
+
+    def _drop_team_lock(self, market_hash: str) -> None:
+        self.market_team_tokens.pop(market_hash, None)
+        self.locked_teams = set(self.market_team_tokens.values())
 
     def chosen_side(self, market_hash: str) -> Side | None:
         for market, side in self.chosen_sides:
@@ -240,6 +266,7 @@ class RiskGate:
         if event_id:
             self.event_markets.setdefault(event_id, set()).add(market_hash)
         self.quoted_kickoff[market_hash] = int(signal.market.game_time or 0)
+        self._add_team_lock(market_hash, soccer_team_lock_token(signal.market, signal.side))
 
     def record(self, signal: Signal, stake: int | None = None) -> None:
         market_hash = signal.market.market_hash
@@ -249,6 +276,7 @@ class RiskGate:
             self.chosen_sides = {item for item in self.chosen_sides if item[0] != market_hash}
             self.pending_order_ids.pop(market_hash, None)
             self.quoted_style.pop(market_hash, None)
+            self._drop_team_lock(market_hash)
             for event_id, hashes in list(self.event_markets.items()):
                 hashes.discard(market_hash)
                 if not hashes:
@@ -268,6 +296,7 @@ class RiskGate:
             self.joined_sides.add((market_hash, signal.side.value))
             self.chosen_sides.add((market_hash, signal.side.value))
             self.pending_order_ids.pop(market_hash, None)
+            self._add_team_lock(market_hash, soccer_team_lock_token(signal.market, signal.side))
 
     def _drop_slot(self, market_hash: str) -> None:
         """Free the cap slot. Keep joined_sides / event lock so we do not flip."""

@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import time
 
+from typing import Any
+
 from sxbot.config import Settings
-from sxbot.models import Market
+from sxbot.models import Market, Side
 from sxbot.units import decimal_odds, to_prob
 from sxbot.wallets import SPORT_BASEBALL, SPORT_FOOTBALL, SPORT_SOCCER, SPORT_TENNIS
 
@@ -111,6 +113,47 @@ def is_soccer_ml(market: Market) -> bool:
     if market.sport_id == SPORT_SOCCER and market.type in {1, 52}:
         return True
     return False
+
+
+def bare_team_name(name: str) -> str:
+    """'Not Náutico Capibaribe' and 'Nautico Capibaribe' lock as the same team."""
+    text = " ".join((name or "").casefold().split())
+    if text.startswith("not "):
+        text = text[4:].strip()
+    return text
+
+
+def soccer_team_lock_token(market: Market, side: Side) -> tuple[str, ...] | None:
+    """Hour + league + team. Type-1 Not-Team shares this with Team vs Team."""
+    if not is_soccer_ml(market):
+        return None
+    picked = market.outcome_one if side is Side.OUTCOME_ONE else market.outcome_two
+    team = bare_team_name(picked)
+    if not team:
+        return None
+    kick = int(market.game_time or 0)
+    hour = str(kick // 3600) if kick else "0"
+    league = (market.league_label or str(market.league_id or "")).casefold()
+    return ("soccer", league, hour, team)
+
+
+def soccer_team_lock_token_from_row(row: dict[str, Any]) -> tuple[str, ...] | None:
+    if str(row.get("style") or "") != "soccer":
+        o1 = str(row.get("outcome_one") or "")
+        o2 = str(row.get("outcome_two") or "")
+        if "not " not in f"{o1} {o2}".casefold():
+            return None
+    side = str(row.get("side") or "")
+    picked = str(row.get("outcome_two") or "") if side == Side.OUTCOME_TWO.value else str(
+        row.get("outcome_one") or ""
+    )
+    team = bare_team_name(picked)
+    if not team:
+        return None
+    kick = int(row.get("game_time") or 0)
+    hour = str(kick // 3600) if kick else "0"
+    league = str(row.get("league") or "").casefold()
+    return ("soccer", league, hour, team)
 
 
 def is_tennis(market: Market) -> bool:

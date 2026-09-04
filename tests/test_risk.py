@@ -227,3 +227,103 @@ def test_blocks_live_market_even_when_watched() -> None:
     live = make_market(market_hash="0x1", game_time=1)
     live_signal = replace(signal, market=live)
     assert gate.allow(live_signal) == "live market disabled"
+
+
+def _soccer_signal(
+    *,
+    hash_: str,
+    event_id: str,
+    outcome_one: str,
+    outcome_two: str,
+    side: Side,
+    game_time: int,
+    type_: int = 52,
+) -> Signal:
+    return Signal(
+        market=make_market(
+            market_hash=hash_,
+            event_id=event_id,
+            sport_id=5,
+            sport_label="Soccer",
+            type=type_,
+            league_id=99,
+            league_label="Brasileiro Serie B",
+            outcome_one=outcome_one,
+            outcome_two=outcome_two,
+            team_one=outcome_one,
+            team_two=outcome_two,
+            game_time=game_time,
+        ),
+        side=side,
+        action=Action.TAKE_FLOW,
+        maker_odds=50_000_000_000_000_000_000,
+        reason="test",
+        mid_move_bps=40,
+        imbalance=0.3,
+        confidence=0.8,
+        style="soccer",
+    )
+
+
+def test_blocks_soccer_win_and_not_win_across_markets() -> None:
+    """Náutico Capibaribe vs Botafogo and Capibaribe / Not Capibaribe are one match."""
+    import time as time_mod
+
+    kick = int(time_mod.time()) + 4 * 3600
+    gate = RiskGate(make_settings(max_exposure_usdc=1000, max_per_market_usdc=25))
+    capibaribe = _soccer_signal(
+        hash_="0x52",
+        event_id="L19935126",
+        outcome_one="Nautico Capibaribe",
+        outcome_two="Botafogo SP",
+        side=Side.OUTCOME_ONE,
+        game_time=kick,
+        type_=52,
+    )
+    not_win = _soccer_signal(
+        hash_="0x01",
+        event_id="L-OTHER",
+        outcome_one="Nautico Capibaribe",
+        outcome_two="Not Nautico Capibaribe",
+        side=Side.OUTCOME_TWO,
+        game_time=kick,
+        type_=1,
+    )
+    gate.record(capibaribe)
+    assert gate.allow(not_win) == "already on this team"
+    assert gate.allow(capibaribe) == "already on this side"
+
+
+def test_hydrate_soccer_blocks_the_not_team_market() -> None:
+    import time as time_mod
+
+    kick = int(time_mod.time()) + 4 * 3600
+    gate = RiskGate(make_settings(dry_run=False, max_exposure_usdc=1000, max_per_market_usdc=25))
+    gate.hydrate(
+        [
+            {
+                "action": "take_flow",
+                "market": "0x52",
+                "side": "outcome_one",
+                "style": "soccer",
+                "event_id": "L19935126",
+                "game_time": kick,
+                "league": "Brasileiro Serie B",
+                "outcome_one": "Nautico Capibaribe",
+                "outcome_two": "Botafogo SP",
+                "dry_run": False,
+                "live_filled": True,
+                "stake": "1000000",
+            }
+        ]
+    )
+    not_win = _soccer_signal(
+        hash_="0x01",
+        event_id="L-OTHER",
+        outcome_one="Nautico Capibaribe",
+        outcome_two="Not Nautico Capibaribe",
+        side=Side.OUTCOME_TWO,
+        game_time=kick,
+        type_=1,
+    )
+    assert gate.allow(not_win) == "already on this team"
