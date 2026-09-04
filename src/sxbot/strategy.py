@@ -14,7 +14,7 @@ The maker-bot (`sxbot mm`) is a separate process and stays a maker.
 from __future__ import annotations
 
 from sxbot.config import Settings
-from sxbot.filters import STYLE_TENNIS_DOG, longshot_skip_reason, order_skip_reason, quote_style
+from sxbot.filters import STEAM_DOG_STYLES, longshot_skip_reason, order_skip_reason, quote_style
 from sxbot.flow import FlowReport, Motive, classify
 from sxbot.models import Action, Market, PublicTrade, Signal, Side
 from sxbot.orderbook import BookView
@@ -116,7 +116,7 @@ def _tob_lag_join_ok(price: int, settings: Settings, style: str | None) -> bool:
     cap = float(settings.tob_lag_max_decimal or 2.20)
     if decimal_odds(to_prob(price)) > cap + 1e-9:
         return False
-    if style == STYLE_TENNIS_DOG:
+    if style in STEAM_DOG_STYLES:
         return False
     return True
 

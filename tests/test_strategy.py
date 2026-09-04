@@ -349,6 +349,123 @@ def test_take_first_takes_tennis_dog_steam() -> None:
     assert signals[0].side is Side.OUTCOME_ONE
 
 
+def test_soccer_pickem_is_not_quoted() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    market = make_market(
+        type=1,
+        sport_id=5,
+        sport_label="Soccer",
+        league_id=1,
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def _soccer_dog_market(**overrides):
+    data = dict(
+        type=1,
+        sport_id=5,
+        sport_label="Soccer",
+        league_id=1,
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    data.update(overrides)
+    return make_market(**data)
+
+
+def _mlb_ml_market():
+    return make_market(
+        type=226,
+        sport_id=3,
+        sport_label="Baseball",
+        league_id=3,
+        league_label="MLB",
+        outcome_one="Dodgers",
+        outcome_two="Pirates",
+    )
+
+
+def test_soccer_dog_joins_on_steam() -> None:
+    prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
+    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    signals = evaluate(
+        _soccer_dog_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals
+    assert signals[0].action is Action.JOIN_MAKER
+    assert signals[0].style == "soccer_dog"
+    assert signals[0].motive == "maker_steam"
+
+
+def test_take_first_takes_soccer_dog_steam() -> None:
+    prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
+    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    signals = evaluate(
+        _soccer_dog_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="take_first"),
+        OddsLadder(125),
+    )
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].style == "soccer_dog"
+    assert signals[0].motive == "maker_steam"
+
+
+def test_take_first_takes_mlb_dog_steam() -> None:
+    prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
+    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    signals = evaluate(
+        _mlb_ml_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="take_first"),
+        OddsLadder(125),
+    )
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].style == "mlb_dog"
+
+
+def test_tob_lag_skips_soccer_and_mlb_dogs() -> None:
+    prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
+    curr = make_book(o1=((30.0, 1), (35.0, 20)), o2=((69.0, 10),), version="2")
+    settings = make_settings(join_tob_lag=True, follow_style="take_first")
+    soccer = evaluate(
+        _soccer_dog_market(),
+        analyze(prev),
+        analyze(curr),
+        settings,
+        OddsLadder(125),
+    )
+    mlb = evaluate(
+        _mlb_ml_market(),
+        analyze(prev),
+        analyze(curr),
+        settings,
+        OddsLadder(125),
+    )
+    assert soccer == []
+    assert mlb == []
+
+
 def test_soccer_type1_joins_favorite_band() -> None:
     prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
     curr = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="2")

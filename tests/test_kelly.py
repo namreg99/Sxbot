@@ -322,6 +322,54 @@ def test_hydrate_live_one_dollar_fill_can_still_take_three() -> None:
     assert gate.needs_live_entry("0x1") is Side.OUTCOME_ONE
 
 
+def _steam_dog_take(style: str, hash_: str = "0xdog") -> Signal:
+    return Signal(
+        market=make_market(market_hash=hash_, event_id=hash_),
+        side=Side.OUTCOME_ONE,
+        action=Action.TAKE_FLOW,
+        maker_odds=from_percent(32.0),
+        reason="steam take",
+        mid_move_bps=80,
+        imbalance=0.2,
+        confidence=0.8,
+        fair_odds=from_percent(40.0),
+        tracker_odds=from_percent(32.0),
+        style=style,
+    )
+
+
+def test_soccer_and_mlb_dogs_stay_flat_one_with_kelly_live_cap() -> None:
+    gate = _kelly_live_gate()
+    soccer = _steam_dog_take("soccer_dog")
+    mlb = _steam_dog_take("mlb_dog", "0xmlb")
+    assert gate.stake_for(soccer) == to_base_units(1)
+    assert gate.stake_for(mlb) == to_base_units(1)
+    gate.record(soccer, stake=to_base_units(1))
+    assert gate.stake_for(soccer) is None
+    assert gate.needs_live_entry(soccer.market.market_hash) is None
+
+
+def test_hydrate_soccer_dog_does_not_kelly_top_up() -> None:
+    gate = _kelly_live_gate()
+    gate.hydrate(
+        [
+            {
+                "action": "take_flow",
+                "market": "0xdog",
+                "side": "outcome_one",
+                "style": "soccer_dog",
+                "dry_run": False,
+                "live_filled": True,
+                "stake": str(to_base_units(1)),
+            }
+        ]
+    )
+    take = _steam_dog_take("soccer_dog")
+    assert gate.exposure.net("0xdog") == to_base_units(1)
+    assert gate.stake_for(take) is None
+    assert gate.needs_live_entry("0xdog") is None
+
+
 def test_allow_uses_passed_kelly_stake() -> None:
     gate = RiskGate(make_settings(max_per_market_usdc=10, max_exposure_usdc=1000, stake_usdc=5))
     signal = Signal(

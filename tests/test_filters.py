@@ -31,11 +31,40 @@ def test_quote_style_soccer_and_nfl() -> None:
         outcome_two="Not Arsenal",
     )
     assert quote_style(soccer, from_percent(65.0), make_settings()) == "soccer"
-    assert quote_style(soccer, from_percent(40.0), make_settings()) is None
+    assert quote_style(soccer, from_percent(50.0), make_settings()) is None
+    assert quote_style(soccer, from_percent(40.0), make_settings()) == "soccer_dog"
     nfl = make_market(type=8, sport_id=8, league_id=243, league_label="NFL")
     assert quote_family(nfl) == "soccer"
     assert quote_style(nfl, from_percent(52.0), make_settings()) == "soccer"
     assert quote_style(nfl, from_percent(70.0), make_settings()) is None
+    vs = make_market(
+        type=52,
+        sport_id=5,
+        sport_label="Soccer",
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Chelsea",
+    )
+    assert quote_style(vs, from_percent(40.0), make_settings()) == "soccer_dog"
+    skipped = make_settings(skip_styles=("soccer_dog",))
+    assert quote_style(soccer, from_percent(40.0), skipped) is None
+
+
+def test_quote_style_mlb_dog_is_moneyline_only() -> None:
+    ml = make_market(type=226, sport_id=3, league_label="MLB", league_id=3, sport_label="Baseball")
+    assert quote_style(ml, from_percent(40.0), make_settings()) == "mlb_dog"
+    assert quote_style(ml, from_percent(52.0), make_settings()) == "mlb"
+    spread = make_market(
+        type=342,
+        sport_id=3,
+        league_label="MLB",
+        league_id=3,
+        sport_label="Baseball",
+        outcome_one="Dodgers +1.5",
+        outcome_two="Pirates -1.5",
+    )
+    assert quote_style(spread, from_percent(40.0), make_settings()) is None
+    assert quote_style(spread, from_percent(52.0), make_settings()) == "mlb"
 
 
 def test_quote_style_tennis_bands() -> None:
@@ -143,3 +172,19 @@ def test_soccer_team_lock_treats_not_team_as_the_same_team() -> None:
     assert soccer_team_lock_token(vs, Side.OUTCOME_ONE) == soccer_team_lock_token(
         not_team, Side.OUTCOME_TWO
     )
+
+
+def test_soccer_dog_row_still_locks_the_team() -> None:
+    from sxbot.filters import soccer_team_lock_token_from_row
+
+    token = soccer_team_lock_token_from_row(
+        {
+            "style": "soccer_dog",
+            "side": "outcome_one",
+            "outcome_one": "Nautico Capibaribe",
+            "outcome_two": "Botafogo SP",
+            "game_time": 1_700_000_000,
+            "league": "Brasileiro Serie B",
+        }
+    )
+    assert token == ("soccer", "brasileiro serie b", str(1_700_000_000 // 3600), "nautico capibaribe")

@@ -4,7 +4,13 @@ import time
 from typing import Any
 
 from sxbot.config import Settings
-from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG, soccer_team_lock_token, soccer_team_lock_token_from_row
+from sxbot.filters import (
+    FLAT_LIVE_DOG_STYLES,
+    STYLE_MM,
+    STYLE_TENNIS_DOG,
+    soccer_team_lock_token,
+    soccer_team_lock_token_from_row,
+)
 from sxbot.kelly import KELLY_ACTIONS, sized_take_usdc, tracker_kelly_usdc
 from sxbot.fills import live_filled_base_units, order_ids, row_live_filled
 from sxbot.models import Action, Exposure, Side, Signal
@@ -37,7 +43,11 @@ class RiskGate:
 
         If we already filled $1 and Kelly is still on, this returns the extra
         $3 to match the paper $25 cap. TAKE_STALE with no Kelly edge → skip.
+        Soccer/MLB steam dogs stay the unique floor until that book has W–L.
         """
+        if (signal.style or "") in FLAT_LIVE_DOG_STYLES:
+            already = self.exposure.net(signal.market.market_hash)
+            return None if already > 0 else self.stake()
         if signal.action in KELLY_ACTIONS:
             sized = sized_take_usdc(self.settings, signal)
             if sized is None:
@@ -61,6 +71,8 @@ class RiskGate:
     def _kelly_topup_room(self, market_hash: str) -> bool:
         """True when a live unique fill is still short of the $4 Kelly cap."""
         if not bool(getattr(self.settings, "kelly_live_cap", False)):
+            return False
+        if self.quoted_style.get(market_hash) in FLAT_LIVE_DOG_STYLES:
             return False
         already = self.exposure.net(market_hash)
         target = to_base_units(float(self.settings.max_per_market_usdc), self.decimals)

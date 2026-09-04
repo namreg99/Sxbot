@@ -327,3 +327,38 @@ def test_hydrate_soccer_blocks_the_not_team_market() -> None:
         type_=1,
     )
     assert gate.allow(not_win) == "already on this team"
+
+
+def test_hydrate_soccer_dog_still_locks_the_not_team() -> None:
+    import time as time_mod
+
+    kick = int(time_mod.time()) + 4 * 3600
+    gate = RiskGate(make_settings(dry_run=False, max_exposure_usdc=1000, max_per_market_usdc=25))
+    gate.hydrate(
+        [
+            {
+                "action": "take_flow",
+                "market": "0x52",
+                "side": "outcome_one",
+                "style": "soccer_dog",
+                "event_id": "L19935126",
+                "game_time": kick,
+                "league": "Brasileiro Serie B",
+                "outcome_one": "Nautico Capibaribe",
+                "outcome_two": "Botafogo SP",
+                "dry_run": False,
+                "live_filled": True,
+                "stake": "1000000",
+            }
+        ]
+    )
+    not_win = _soccer_signal(
+        hash_="0x01",
+        event_id="L-OTHER",
+        outcome_one="Nautico Capibaribe",
+        outcome_two="Not Nautico Capibaribe",
+        side=Side.OUTCOME_TWO,
+        game_time=kick,
+        type_=1,
+    )
+    assert gate.allow(not_win) == "already on this team"

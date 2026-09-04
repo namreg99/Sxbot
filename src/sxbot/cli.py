@@ -157,9 +157,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run" and args.live:
         settings = apply_live_run(settings)
         print(
-            "LIVE take_first: same unique-follow team (including tennis dogs), "
-            "HIT the other side (IOC). Takes do not sit on SX as offers. "
-            "This mode does not post resting joins.",
+            "LIVE take_first: same unique-follow team (including tennis dogs "
+            "and soccer/MLB steam dogs), HIT the other side (IOC). Takes do "
+            "not sit on SX as offers. This mode does not post resting joins.",
             flush=True,
         )
     if args.cmd == "summary":

@@ -17,7 +17,7 @@ from sxbot.wallets import SPORT_BASEBALL, SPORT_FOOTBALL, SPORT_SOCCER, SPORT_TE
 
 TOTAL_TYPES = {2, 28, 236}
 # Paper styles. Each `sxbot run` join goes to sxbot-paper-{style}.jsonl.
-QUOTE_STYLES = ("mlb", "soccer", "tennis_short", "tennis_dog", "mm")
+QUOTE_STYLES = ("mlb", "mlb_dog", "soccer", "soccer_dog", "tennis_short", "tennis_dog", "mm")
 STYLE_MM = "mm"
 
 # Type 226 is SX's MLB moneyline. Type 1 is soccer Team / Not Team.
@@ -29,6 +29,12 @@ NFL_LEAGUE_ID = 243
 TENNIS_NON_ML_TYPES = {3, 166, 201, 236, 342, 866} | TOTAL_TYPES
 
 STYLE_TENNIS_DOG = "tennis_dog"
+STYLE_SOCCER_DOG = "soccer_dog"
+STYLE_MLB_DOG = "mlb_dog"
+# Steam/rotation dogs. Parked-depth (tob_lag) on these was a trap on tape.
+STEAM_DOG_STYLES = frozenset({STYLE_TENNIS_DOG, STYLE_SOCCER_DOG, STYLE_MLB_DOG})
+# No unique W–L yet — live stays the $1 floor even when Kelly would want $4.
+FLAT_LIVE_DOG_STYLES = frozenset({STYLE_SOCCER_DOG, STYLE_MLB_DOG})
 
 
 def order_skip_reason(market: Market, settings: Settings, *, now: int | None = None) -> str | None:
@@ -138,7 +144,7 @@ def soccer_team_lock_token(market: Market, side: Side) -> tuple[str, ...] | None
 
 
 def soccer_team_lock_token_from_row(row: dict[str, Any]) -> tuple[str, ...] | None:
-    if str(row.get("style") or "") != "soccer":
+    if str(row.get("style") or "") not in {"soccer", STYLE_SOCCER_DOG}:
         o1 = str(row.get("outcome_one") or "")
         o2 = str(row.get("outcome_two") or "")
         if "not " not in f"{o1} {o2}".casefold():
@@ -211,9 +217,13 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
     """Which paper log a join belongs in, or None if we should not quote.
 
     mlb           — MLB ML/spread 1.80–2.20
-    soccer        — soccer type-1 (not Not-tie) 1.12–2.20, plus NFL 1.80–2.20
+    mlb_dog       — MLB moneyline 2.20–3.50 (steam/rotation only; flat $1 live)
+    soccer        — soccer favs 1.12–1.80, plus NFL pick'em 1.80–2.20
+    soccer_dog    — soccer 2.20–3.50 (steam/rotation only; flat $1 live)
     tennis_short  — tennis 1.12–1.80
     tennis_dog    — tennis 2.20–3.50, pregame entry, live exit
+
+    Soccer pick'em 1.80–2.20 is dropped (unique follow was coin-flip / slightly red).
     """
     if price <= 0:
         return None
@@ -221,9 +231,15 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
         return None
     dec = decimal_odds(to_prob(price))
     cap = float(settings.max_order_decimal or 3.5)
+    dog_hi = min(3.50, cap) if cap > 0 else 3.50
     style: str | None = None
-    if is_soccer_ml(market) and _in_band(dec, 1.12, 2.20):
-        style = "soccer"
+    if is_soccer_ml(market):
+        if _in_band(dec, 1.12, 1.80):
+            style = "soccer"
+        elif _in_band(dec, 2.20, dog_hi):
+            style = STYLE_SOCCER_DOG
+    elif is_mlb(market) and market.type == MLB_MONEYLINE_TYPE and _in_band(dec, 2.20, dog_hi):
+        style = STYLE_MLB_DOG
     elif is_mlb(market) and _in_band(dec, 1.80, 2.20):
         style = "mlb"
     elif is_nfl(market) and _in_band(dec, 1.80, 2.20):
@@ -231,10 +247,8 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
     elif is_tennis(market):
         if _in_band(dec, 1.12, 1.80):
             style = "tennis_short"
-        else:
-            dog_hi = min(3.50, cap) if cap > 0 else 3.50
-            if _in_band(dec, 2.20, dog_hi):
-                style = "tennis_dog"
+        elif _in_band(dec, 2.20, dog_hi):
+            style = "tennis_dog"
     skipped = {s.strip().lower() for s in settings.skip_styles if s}
     if style and style in skipped:
         return None
@@ -250,7 +264,7 @@ def mm_quote_style(market: Market, price: int) -> str | None:
     """Where pregame *maker fills* were not red. Not the follow-bot bands.
 
     Pick'em (1.80–2.20) is the worst maker bucket in soccer, MLB ML, and tennis.
-    Follow-bot `quote_style` still uses pick'em for steam joins — do not mix them.
+    Follow-bot soccer pick'em is dropped; NFL/MLB pick'em still steam-join.
     """
     if price <= 0:
         return None
