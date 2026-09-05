@@ -297,6 +297,10 @@ def test_follow_buckets_split_priced_vs_ev(tmp_path) -> None:
     assert snap["follow_record"]["wins"] == 1
     assert snap["follow_record"]["losses"] == 1
     assert snap["record"]["wins"] == 2
+    assert snap["not_ev"]["losses"] == 1
+    assert snap["not_ev_by_style"]["tennis_dog"]["losses"] == 1
+    assert snap["not_ev_by_style"]["soccer"]["wins"] == 0
+    assert (tmp_path / "sxbot-not-ev.jsonl").exists()
 
 
 def test_lifetime_record_keeps_settled_after_cancel(tmp_path) -> None:

@@ -13,6 +13,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -35,6 +36,8 @@ BEST_PRICED_MAX_DECIMAL = 1.80
 MAKER_EV_MOTIVES = {"maker_steam", "size_rotation", "take_stale", "mm_quote"}
 DEFAULT_MIN_IMBALANCE = 0.15
 LIVE_TEST_TRADES = 100
+# Follow styles we always show on the not-EV card, even at 0–0.
+NOT_EV_STYLES = ("mlb", "mlb_dog", "soccer", "soccer_dog", "tennis_short", "tennis_dog")
 
 
 def _utc(ts: int | float | None) -> str:
@@ -464,6 +467,68 @@ def _remap_record(
     return rec
 
 
+def not_ev_log_for(paper_log: str) -> Path:
+    return Path(paper_log).with_name("sxbot-not-ev.jsonl")
+
+
+def _not_ev_card(by_style: dict[str, dict[str, Any]], overall: dict[str, Any]) -> dict[str, Any]:
+    card: dict[str, Any] = {
+        "all": (
+            overall.get("wins"),
+            overall.get("losses"),
+            overall.get("roi_pct"),
+        )
+    }
+    for style, rec in by_style.items():
+        card[style] = (rec.get("wins"), rec.get("losses"), rec.get("roi_pct"))
+    return card
+
+
+def append_not_ev_record(
+    paper_log: str,
+    *,
+    generated_at: str,
+    overall: dict[str, Any],
+    by_style: dict[str, dict[str, Any]],
+) -> None:
+    """Append a compact not-EV ROI line when the W–L / ROI card changes."""
+    path = not_ev_log_for(paper_log)
+    card = _not_ev_card(by_style, overall)
+    last = None
+    if path.exists():
+        try:
+            lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+            if lines:
+                last = json.loads(lines[-1])
+        except (OSError, json.JSONDecodeError):
+            last = None
+    if last and last.get("card") == card:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "ts": time.time(),
+        "generated_at": generated_at,
+        "card": card,
+        "not_ev": {
+            "wins": overall.get("wins"),
+            "losses": overall.get("losses"),
+            "roi_pct": overall.get("roi_pct"),
+            "pnl_usdc": overall.get("pnl_usdc"),
+        },
+        "by_style": {
+            k: {
+                "wins": v.get("wins"),
+                "losses": v.get("losses"),
+                "roi_pct": v.get("roi_pct"),
+                "pnl_usdc": v.get("pnl_usdc"),
+            }
+            for k, v in by_style.items()
+        },
+    }
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
+
+
 def paper_record(views: list[dict[str, Any]]) -> dict[str, Any]:
     """Unique W–L on the executed paper stake, plus $5 flat and Kelly shadows.
 
@@ -580,6 +645,7 @@ def build_snapshot(
     follow_bets = [b for b in life_bets if str(b.get("style") or "") != STYLE_MM]
     best_priced = [b for b in follow_bets if b.get("best_priced")]
     maker_ev = [b for b in follow_bets if b.get("with_makers")]
+    not_ev = [b for b in follow_bets if not b.get("with_makers")]
     priced_ev = [b for b in best_priced if b.get("with_makers")]
     by_style: dict[str, list[dict[str, Any]]] = {}
     for bet in life_bets:
@@ -595,8 +661,31 @@ def build_snapshot(
     live_life = [_view_row(row) for row in unique_lifetime_rows(live_rows)]
     live_follow = [b for b in live_life if str(b.get("style") or "") != STYLE_MM]
     live_record = paper_record(live_follow)
+    not_ev_record = paper_record(not_ev)
+    not_ev_by_style = {
+        style: paper_record([b for b in not_ev if str(b.get("style") or "") == style])
+        for style in NOT_EV_STYLES
+    }
+    extra_not_ev = sorted(
+        {
+            str(b.get("style") or "legacy")
+            for b in not_ev
+            if str(b.get("style") or "legacy") not in NOT_EV_STYLES
+        }
+    )
+    for style in extra_not_ev:
+        not_ev_by_style[style] = paper_record(
+            [b for b in not_ev if str(b.get("style") or "legacy") == style]
+        )
+    generated_at = _utc(now_ts)
+    append_not_ev_record(
+        settings.paper_log,
+        generated_at=generated_at,
+        overall=not_ev_record,
+        by_style=not_ev_by_style,
+    )
     return {
-        "generated_at": _utc(now_ts),
+        "generated_at": generated_at,
         "generated_ts": now_ts,
         "big_fill_usdc": min_usdc,
         "tape_fills": len(tape_rows),
@@ -615,6 +704,8 @@ def build_snapshot(
             "max_decimal": BEST_PRICED_MAX_DECIMAL,
         },
         "maker_ev": paper_record(maker_ev),
+        "not_ev": not_ev_record,
+        "not_ev_by_style": not_ev_by_style,
         "priced_ev": {
             **paper_record(priced_ev),
             "max_decimal": BEST_PRICED_MAX_DECIMAL,
@@ -742,6 +833,13 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
         f"{html.escape(k)} {v.get('wins', 0)}–{v.get('losses', 0)}"
         for k, v in styles.items()
     ) or "—"
+    not_ev_styles = snap.get("not_ev_by_style") or {}
+    not_ev_bits = " · ".join(
+        f"{html.escape(k)} {v.get('wins', 0)}–{v.get('losses', 0)}"
+        + (f" ROI {v['roi_pct']:+.0f}%" if v.get("roi_pct") is not None else "")
+        for k, v in not_ev_styles.items()
+        if (v.get("wins") or 0) + (v.get("losses") or 0) > 0 or v.get("pending")
+    ) or "—"
     tape_note = ""
     if not snap.get("tape_fills"):
         tape_note = (
@@ -787,6 +885,8 @@ def render_html(snap: dict[str, Any], *, refresh: int = 20) -> str:
 <div class="kpis">
   <div class="kpi"><b>follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}</b>{html.escape(rec(snap.get("best_priced"), books=True))}</div>
   <div class="kpi"><b>follow maker EV (steam / parked size)</b>{html.escape(rec(snap.get("maker_ev"), books=True))}</div>
+  <div class="kpi"><b>follow not EV (no maker lean)</b>{html.escape(rec(snap.get("not_ev"), books=True))}</div>
+  <div class="kpi"><b>not EV by style</b>{html.escape(not_ev_bits)}</div>
   <div class="kpi"><b>follow short + EV</b>{html.escape(rec(snap.get("priced_ev"), books=True))}</div>
   <div class="kpi"><b>taker bot unique (`sxbot run`) $5 / Kelly $25</b>{html.escape(rec(snap.get("follow_record"), books=True))}</div>
   <div class="kpi"><b>live unique $1–$4 (new book)</b>{html.escape(rec(snap.get("live_record"), books=True))}</div>
@@ -868,6 +968,7 @@ def render_text(snap: dict[str, Any]) -> str:
         f"sxbot board  {snap.get('generated_at')}",
         rec(snap.get("best_priced"), f"follow best priced ≤{BEST_PRICED_MAX_DECIMAL:.2f}", books=True),
         rec(snap.get("maker_ev"), "follow maker EV", books=True),
+        rec(snap.get("not_ev"), "follow not EV (no maker lean)", books=True),
         rec(snap.get("priced_ev"), "follow short + EV", books=True),
         rec(snap.get("follow_record"), "taker bot unique $5 / Kelly $25 (sxbot run)", books=True),
         rec(snap.get("live_record"), "live unique $1-$4 (new book)", books=True),
@@ -887,6 +988,14 @@ def render_text(snap: dict[str, Any]) -> str:
         )
     else:
         lines.append("best priced open: none")
+    for style, rec_s in (snap.get("not_ev_by_style") or {}).items():
+        if (rec_s.get("wins") or 0) + (rec_s.get("losses") or 0) == 0 and not rec_s.get("pending"):
+            continue
+        roi = rec_s.get("roi_pct")
+        roi_s = f" ROI {roi:+.0f}%" if roi is not None else ""
+        lines.append(
+            f"not EV {style}: {rec_s.get('wins', 0)}–{rec_s.get('losses', 0)}{roi_s}"
+        )
     lines.append("")
     lines.append(f"5k+ today ({len(snap.get('today') or [])})")
     lines.extend(line_fill(f) for f in (snap.get("today") or [])[:15])
