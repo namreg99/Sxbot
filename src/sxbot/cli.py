@@ -7,11 +7,11 @@ import time
 
 from dataclasses import replace
 
-from sxbot.api import SxApiError, SxClient, index_markets
+from sxbot.api import SxApiError, SxClient, index_markets, lookup_market
 from sxbot.board import build_snapshot, render_text, serve_board
 from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
-from sxbot.filters import STYLE_TENNIS_DOG
+from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
 from sxbot.flow import Motive
 from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
@@ -98,6 +98,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "grade",
         help="Score paper bets after games are reported (assumes fills; not a historical book backtest)",
+    )
+    sub.add_parser(
+        "replay",
+        help="Filter-backtest unique follow: keep maker-size tickets, drop steam-without-size",
     )
     sub.add_parser(
         "sharp",
@@ -194,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
                 return cmd_live_ping(client, settings, args)
             if args.cmd == "grade":
                 return cmd_grade(client, settings)
+            if args.cmd == "replay":
+                return cmd_replay(client, settings)
             if args.cmd == "sharp":
                 return cmd_sharp(client, settings)
             if args.cmd == "archive":
@@ -451,6 +457,41 @@ def _print_grade(client: SxClient, path: str, *, title: str) -> None:
     markets = index_markets(found)
     print(f"# {title}  ({path})")
     print(format_grade(grade_paper(rows, markets, decimals=6)))
+
+
+def cmd_replay(client: SxClient, settings: Settings) -> int:
+    """Grade unique follow under the size-not-steam keep/skip split."""
+    from sxbot.board import _paper_view, unique_lifetime_rows
+    from sxbot.grade import grade_row
+    from sxbot.journal import load_follow_live, load_follow_paper
+    from sxbot.replay import format_replay, split_model
+
+    paper = load_follow_paper(settings.paper_log)
+    live = load_follow_live(settings.paper_log)
+    rows = unique_lifetime_rows(paper + live)
+    follow = [row for row in rows if str(row.get("style") or "") != STYLE_MM]
+    if not follow:
+        print(
+            "No unique follow tickets in the paper/live logs on this machine. "
+            "Run `sxbot replay` on the laptop that has been running `sxbot run` "
+            "(the jsonl files do not live in git)."
+        )
+        return 1
+    hashes = list(dict.fromkeys(str(row.get("market") or "") for row in follow if row.get("market")))
+    found = client.find_markets(hashes) if hashes else []
+    markets = index_markets(found)
+    views: list[dict] = []
+    for row in follow:
+        view = _paper_view(
+            grade_row(row, lookup_market(markets, str(row.get("market") or ""))),
+            row,
+            settings,
+        )
+        view["reason"] = row.get("reason") or ""
+        views.append(view)
+    keep, skip = split_model(views)
+    print(format_replay(views, keep, skip))
+    return 0
 
 
 def cmd_sharp(client: SxClient, settings: Settings) -> int:
