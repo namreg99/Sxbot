@@ -1,2 +1,239 @@
 # Sxbot
-Sportsbetting bot
+
+A trading bot for [SX Bet](https://sx.bet), a peer-to-peer sports betting exchange. It does **not** copy wallets. It follows the market makers who actually set the line.
+
+Nothing here is guaranteed edge. The useful output right now is (1) a paper log of what we *would* have done on live books, and (2) a flow log of where informed size showed up, pregame vs live.
+
+## How a trade works (plain English)
+
+SX Bet is not a sportsbook like DraftKings. It is a marketplace. People post prices, other people take them — the same idea as a stock exchange, but the "stock" is "will this team cover / will this total go over."
+
+**Market makers** are the people who keep a price up on *both* sides of a game (Team A *and* Team B, or Over *and* Under). When they change their mind they move those prices. That move is the "smart money" this bot is trying to follow. It does **not** copy random winning wallets.
+
+Every couple of seconds the bot looks at the live prices and asks:
+
+1. Did the makers just move both sides the same way? → sit on that side, one tick worse than them (so we are not jumping in front).
+2. Did they pull money off one side and pile it on the other? → same thing, join the heavy side.
+3. Is leftover junk sitting at a stale price? → take it, because that *is* betting with the makers.
+4. Is the **body** of the book (parked depth) ahead of the displayed best, on a short or pick’em (decimal ≤2.20)? → join the body. Dogs on this signal are a trap; they are skipped.
+5. Did a random bettor just smash the top of the book? → ignore it.
+
+In **paper mode** (the default) it writes "I would have bet $5 on X at 49%" to a file. It does **not** send an order and it does **not** spend money. Real orders only happen if you later turn dry-run off and add keys.
+
+**Two bots, two books. Do not mix them.**
+
+- **Taker bot** (`sxbot run`) uses maker bias to bet the *same* team the makers are leaning — Botswana-style. Default `SX_FOLLOW_STYLE=join` sits one tick behind them as a maker order. `SX_FOLLOW_STYLE=take` hits the leftover book to *get* that same team (you pay the spread). Either way the card is **TAKE/JOIN $5 {that team}**. It is not fading the heavy quotes.
+- **Maker bot** (`sxbot mm`) stays a maker and is scored at **maker odds** on the quoted side. If we make **San Francisco at 2.45**, someone had to bet **Cincinnati at ~1.69** to fill us. That mirror bet is how the fill happens — it is not the taker bot's P&L.
+
+Example: makers lean Cincinnati at 1.64. The taker bot wants Cincinnati (with the steam). The maker bot quoting San Francisco at 2.45 fills when a stranger bets Cincinnati at 1.6. Those are different processes and different unique cards.
+
+**We cannot backtest last season.** SX does not keep old order books, so there is nothing to rewind. What we *can* do is leave paper mode running, then after SX *reports* the market run `sxbot grade`. A TV/scoreboard final is not the same as an SX `outcome` — totals often report first; moneylines and spreads can stay pending for hours. That scores those paper quotes *if they had been filled*. Joining as a maker often does not fill, so graded P&L is the optimistic case.
+
+## How it works
+
+SX Bet is an exchange, not a sportsbook. The people who matter are the **makers** who keep two-sided quotes up. When they know something they reprice both sides, rotate size onto one outcome, or leave stale quotes through the new mid. Takers lifting the top look different: size disappears on one side *and* the tape prints.
+
+Sxbot polls the book, classifies that microstructure, and either:
+
+1. **Takes stale quotes** (`take_stale`, IOC) when leftover size is sitting through the new mid — betting *with* the makers.
+2. **Joins as a maker** (`join_maker`, GTC) one tick behind the new best on the informed side.
+
+It ignores taker hits. It does not dime the lead quote. Live (in-play) markets are watched for intel but **not traded** unless you set `SX_ALLOW_LIVE=true`.
+
+### V2 now, V3 on August 25
+
+V3 mainnet books are gated until **August 25, 2026, 10:00 AM EST**. Until then:
+
+- Mainnet V3 snapshot/tape/order routes 403.
+- Mainnet **V2** `GET /orders` and `GET /trades` still return the real books.
+- Testnet V3 books are dummy/symmetric and useless for extracting anything.
+
+The bot defaults to **mainnet**. It sums V2 resting orders by price/side into the same anonymous `Book` the V3 classifier uses, and throws away maker addresses. After cutover it switches to `GET /orderbook-v3/snapshot` on the same URL. The strategy does not change.
+
+## Is it paper trading? Is it recording?
+
+Only while `sxbot run` is actually running. There is no background daemon. Dry-run is the default (`SX_DRY_RUN=true`): intended orders go to `sxbot-paper-{mlb,soccer,tennis_short,tennis_dog}.jsonl` and nothing is signed. `sxbot mm` writes `sxbot-paper-mm.jsonl`. Flow events go to `sxbot-flow.jsonl`. `sxbot summary` prints both.
+
+**Paper logs are append-only history. Never delete one.** Every `sxbot-paper*.jsonl` that exists is loaded — the legacy mixed dump, the per-style files, and `sxbot-paper-recovered.jsonl` (history rebuilt from process logs after the original Aug 21–24 book was erased; its first day is unrecoverable and skews the recovered card green). Each row is written to exactly one file, so loading them all does not double count.
+
+The board keeps **taker unique** (`sxbot run`) and **maker unique** (`sxbot mm`) on separate cards. Combined unique is the live-test gate only — do not read it as one bot's ROI. A kickoff cancel does **not** erase a settled win. The **open** table is the live book: cancel drops that side.
+
+Follow paper is split on the board into **best priced** (decimal ≤1.80), **maker EV** (steam / size parked on our side), and the overlap. Each card shows W–L, win%, and ROI on settled unique quotes (assumes fills). MM has its own unique card.
+
+Live orders additionally need `SX_API_KEY`, `SX_PRIVATE_KEY`, `pip install -e ".[trade]"`, a funded proxy, and `SX_DRY_RUN=false`. Keep paper mode on until that log looks like a strategy you actually want to fund.
+
+## Quick start
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+cp .env.example .env
+```
+
+```bash
+sxbot doctor          # connectivity + which book source (V2 vs V3)
+sxbot scan            # rank live books by maker-size imbalance
+sxbot flow            # classify steam / rotation / lag / taker / crossed
+sxbot radar           # sweep ~30s, print ranked "where is the money right now" (read it, bet yourself)
+sxbot run             # paper-trade loop (writes jsonl)
+sxbot summary         # what has been recorded so far
+sxbot grade           # after SX reports the outcome (TV final is not enough)
+sxbot scoreboard      # grade the SIGNAL itself vs. the price already in the book
+sxbot sharp           # fingerprint known wallets (V2 only, until Aug 25)
+sxbot archive         # pull winter + summer fill history into SQLite
+sxbot profiles        # sport / odds / live-vs-pregame style report
+sxbot makers          # labeled wallets that mostly make, ranked by fill ROI
+sxbot fit             # rebuild sxbot-maker-model.json from the sqlite
+sxbot overlap         # V2 only: who was quoting when our classifier fired?
+sxbot mimic           # paper-copy new fills from those wallets (V2 only)
+sxbot mm              # pregame ghost maker, heavy side (paper; own log)
+sxbot board           # dashboard on THIS machine: http://127.0.0.1:8765
+                      # unique W–L is lifetime (kickoff cancel keeps the card)
+```
+
+`sxbot flow --once` and `sxbot run --once` do two polls then exit. `sxbot mm --once` quotes the current pregame books immediately (it does not need a previous snapshot).
+
+Mainnet: `https://api.sx.bet` (default)  
+Testnet: `https://api.toronto.sx.bet`
+
+## The tool for a human bettor, not an autobot
+
+`sxbot radar --seconds 30` is the direct answer to "where is the smart money right now": it sweeps the live book for a window (one instant rarely catches anything — most markets do not reprice every poll), then prints every market that showed a maker steam, size rotation, top-of-book lag, or a crossed/stale quote, ranked by confidence, with the reasoning spelled out and the kickoff time. Nothing gets bet automatically — you read it and decide.
+
+Confidence there is a hand-tuned heuristic, not proof. `sxbot scoreboard` is how you find out if it's real: it grades the **signal itself** — not paper orders — against real settled results. It reports two numbers per motive and per confidence bucket:
+
+- **hit rate** — how often the flagged side won. On its own this is close to useless: a signal that only ever fires on heavy favorites "hits" most of the time for free, because the price already said so.
+- **avg edge** — the actual result (1/0) minus the implied probability the book was *already quoting* for that side the moment the signal fired. This is the number that can't be faked by picking favorites. Near 0% means the signal adds nothing beyond the price that was already there; positive and durable across a real sample is the only thing that would make this a genuine "better bettor" tool.
+
+Run `sxbot run` (or just `sxbot flow`) for a while so `sxbot-flow.jsonl` accumulates, then `sxbot scoreboard` once some of those games have finished. Treat anything under ~100 settled events as noise — small samples in sports betting lie constantly, in both directions.
+
+### Is historical wallet data worth building on?
+
+Mostly no, and that skepticism is correct. `archive`/`sharp`/`mimic` read wallet-attributed V2 fills, which vanish from the public API after the V3 cutover (Aug 25) — anything built to depend on a specific address stops working that day. What those addresses *can* still tell you, while V2 lasts, is which sports/leagues/bet-types tend to have the most informed two-sided quoting (e.g. `cypherprod` above is a real, currently-profitable maker, concentrated in soccer) — that's a hint about where to point `radar`/`run`, not a wallet-copy product. The durable instrument is `flow.py` + `scoreboard`: it never depended on addresses, works identically on mainnet today (via the V2→book adapter) and on V3 after cutover, and its only real validation is the settled-outcome evidence `scoreboard` produces — not a story about named wallets.
+
+## What you can extract before V3 — and what still helps after
+
+| Build now | Why it still matters after V3 |
+| --- | --- |
+| Paper-trade the same join/take rules on **real** mainnet books | Identical classifier; only the snapshot transport changes |
+| Record `maker_steam`, `size_rotation`, `tob_lag`, `taker_hit`, `crossed` tagged **pregame vs live** | After V3 you still cannot see wallets; this *is* the smart-money tape |
+| Calibrate which motives actually print (summary over days of jsonl) | Same labels on V3, so the sample is not thrown away |
+| Do **not** build a wallet-copy product | Addresses die on August 25 |
+
+Pregame is the cleaner tape (no betting delay, less toxic flow). Live is noisier; we log it so you can see where size is, but we do not join those books by default.
+
+## Configuration
+
+See `.env.example`. The knobs that matter:
+
+| Variable | Meaning |
+| --- | --- |
+| `SX_SPORT_IDS` | Universe. `8,1,3,2,5,6` = football, basketball, baseball, hockey, soccer, tennis |
+| `SX_ONLY_MAIN_LINE` | Skip alternate spreads/totals |
+| `SX_WATCH_LIVE` | Include in-play books in the intel poll (default on) |
+| `SX_ALLOW_LIVE` | Off by default. Allow paper/live *orders* on in-play |
+| `SX_MIN_MID_MOVE_BPS` | How far the mid must move (100 bps = 1 implied-probability point) |
+| `SX_MIN_IMBALANCE` | Size skew that counts as makers parking money on one side |
+| `SX_JOIN_TICKS_BEHIND` | Rest behind the lead MM instead of penny-jumping them |
+| `SX_STAKE_USDC` | Flat size per join / MM fill (and Kelly floor). Live mainnet min is **1 USDC**. Paper default stays 5 |
+| `SX_BANKROLL_USDC` | Paper bankroll for Kelly takes (default 1000) |
+| `SX_KELLY_FRACTION` | Fractional Kelly on takes. 0.50 = moderate, 0.75 = aggressive, default **0.625** mid |
+| `SX_KELLY_MAX_FRAC` | Never bet more than this share of bankroll on one take (default 5%) |
+| `SX_MAX_MARKETS` | Cap on markets polled each loop (soonest kickoff first, plus a live slice) |
+| `SX_FOLLOW_STYLE` | `join` (sit behind makers, same team), `take` (hit now, same team as steam), `mixed` |
+| `SX_SKIP_STYLES` | Comma-separated quote styles to never join (`tennis_dog`, `mlb`, …). Empty = all styles |
+| `SX_JOIN_TOB_LAG` | Join parked-depth leads (default **on** in `sxbot run`). Dogs over `SX_TOB_LAG_MAX_DECIMAL` are skipped |
+| `SX_TOB_LAG_MAX_DECIMAL` | Cap for tob-lag joins (default 2.20). Tape: ≤2.20 +6.3% unique ROI; 2.20–3.50 −14% |
+| `SX_MM_TWO_SIDED` | `false` (default): ghost-quote the heavy side only. `true`: rest both sides for a spread |
+| `SX_MM_MIN_ROI` | Skip a ghost quote if the fitted cell shrinks below this (default 0) |
+| `SX_MM_MODEL_PATH` | Fill-ROI table from `sxbot fit` (default `sxbot-maker-model.json`) |
+| `SX_MM_MAX_WIDEN_TICKS` | Two-sided maker: extra ticks behind the inside until both quotes sum to < 100% |
+| `SX_MM_MIN_OVERROUND_BPS` | Minimum locked edge if both MM sides fill (default 25 bp of implied prob) |
+| `SX_SHARP_WALLETS` | Extra addresses on top of the four already paired (Gary, cypherprod, BotswanaMC, HedgeHog) |
+| `SX_MIMIC_MAX_DECIMAL` | Mimic skips longer shots than this (default 3.5 — do not clone 7.84 alts) |
+| `SX_MIMIC_LOG` | Mimic paper log (default `sxbot-mimic.jsonl`) — do not share with `SX_PAPER_LOG` |
+| `SX_BOOK_SOURCE` | `auto` (V2 on mainnet until cutover), or force `v2` / `v3` |
+
+## How sharp money is recovered without wallets
+
+| What you see | What it usually means | What we do |
+| --- | --- | --- |
+| Both sides of the book reprice the same way, often with **no** tape print | Makers moved fair value (steam) | Join that side |
+| Resting size pulled off one outcome and added to the other | Makers want to be long that outcome | Join that side |
+| Depth-weighted mid leads the displayed mid | The body of the book is informed; the top is leftover or a probe | Join the body if decimal ≤ `SX_TOB_LAG_MAX_DECIMAL` (default 2.20). Off for dogs. |
+| Size disappears at the best **and** the tape printed | A taker lifted offers | Ignore — do not copy takers |
+| Leftover quotes sitting through the new mid (crossed book) | Stale size after a steam | Take it — that *is* betting with the makers |
+
+`sxbot flow` prints that classification live. `sxbot run` is the taker/follow bot: it papers maker-driven motives *with* the steam. `SX_FOLLOW_STYLE=take` hits the leftover book to get the same team as the makers (Botswana, $5); `mixed` does that only on strong steam/rotation; default `join` sits one tick behind. `sxbot mm` is a separate maker bot scored at maker odds.
+
+## Fingerprinting wallets before V3
+
+Known profitable addresses are useful until **August 25**, then they vanish from the public API. Four wallets are already paired from unique fills (GambleGuruGary, cypherprod, BotswanaMC, HedgeHog) and those are the only default `sxbot mimic` / `sxbot overlap` targets. Two more addresses (`TennisMix`, `SoccerTaker`) are **archive research only** — a hot 5-day slice is not a copy list. `sxbot archive` pulls the biggest V2 sample the API will give us across **winter (Dec/Jan NFL/NBA/NHL)** and **summer (soccer, baseball, tennis)** windows — not one endless scrape from December 1, which never reaches January because Gary prints hundreds of fills a day. `sxbot archive --wallet TennisMix --wallet SoccerTaker` ingests just the candidates into the same sqlite.
+
+`sxbot profiles` turns that SQLite into a style card: maker vs taker, sport mix (tennis included), live vs pregame, odds buckets (the ≤1.12 hammer vs 7.84 lottery tickets), scale-in, and **net** P&L vs the gross “Won” leaderboard. `sxbot mimic` paper-copies **new** taker fills at `SX_STAKE_USDC` (and HedgeHog-style resting quotes) while V2 still attributes them. Copies go to `sxbot-mimic.jsonl`, not the join paper log. The first poll primes the last 20 minutes of fill ids so it does not dump that window as “new.” One market+side is copied once (Gary hitting Under 3.5 ten times is still one paper take). Longshots above `SX_MIMIC_MAX_DECIMAL` (3.5) are skipped.
+
+`sxbot overlap` is the last labeled check before cutover: each flow signal is tagged with which of the four wallets were *resting* on the flagged side (`quoted_by`) and which *took* it on the same poll (`takers`). Leave `sxbot flow` or `sxbot run` going on V2, then `sxbot overlap`. After August 25 that column is gone; keep the jsonl and grade it against SX outcomes.
+
+After V3, drop mimic. Keep `SX_FOLLOW_STYLE=take` for a Gary-like soccer/tennis steam taker, `sxbot run` `join` for one-sided steam follows, and `sxbot mm` for a one-sided ghost maker (or `SX_MM_TWO_SIDED=true` for a HedgeHog-like two-sided book). Do not mix them in one process.
+
+## Pregame market maker (`sxbot mm`)
+
+This is a **separate** paper bot from `sxbot run`. Paper orders cannot actually rest on SX, so this bot **ghost-quotes**: it studies resting size on each side, sits one tick behind the **heavy** book (where makers already parked), and pretends that quote is live. A fill is scored only when the public tape takes the opposite outcome **at or through our price**, or the inside on our side is eaten to us after an opposite take. After a fill we **hold** — we do not auto-hedge the other side.
+
+Maker extract is **not** the follow-bot price band. Pick’em (1.80–2.20) is the worst maker bucket in soccer, MLB moneylines, and tennis. Default one-sided bands:
+
+- **Soccer type-1** (Team / Not Team): short 1.12–1.40 or dog 2.20–3.50
+- **MLB moneyline**: fav 1.40–1.80 or dog 2.20–3.50
+- **MLB run-line**: 1.12–1.80 (not pick’em)
+- **Tennis match ML**: fav 1.40–1.80 or dog 2.20–3.50
+
+Skip soccer Team/Team, NFL, basketball, totals, and pick’em. Hold the posted side through size flicker; do not reprice on a 1-tick wobble.
+
+`sxbot fit` learns a **table**, not a neural net. The sqlite has settled maker fills, not old order books, so there is nothing to train a deep model on. Each sport × type × odds-band × pregame/live cell gets a shrunk fill-ROI (prior $25k toward 0%). `sxbot mm` loads `sxbot-maker-model.json` and skips a quote if that cell shrinks red. Hardcoded bands stay as a second gate.
+
+**Maker rewards are a different payout.** SX pays USDC while a qualifying limit stays *unmatched* (mainline, typically ≥$100, better than the orange global line, rest ≥10s). A fill **stops** those points. The orange line is not on the public book API, paper quotes never rest, and reward USDC is not in the sqlite. Paper therefore trains fill ROI. Live rewards need a later module that can see the orange line and post $100+ without jumping the queue.
+
+Two-sided making (rest both outcomes, lock an overround if both fill, plus maker rewards while unmatched) is the spread/rewards shape. It is **not** the better extract path in the labeled sample: HedgeHog was ~70% maker and still red on fills, and only about a third of their maker markets filled both ways. `SX_MM_TWO_SIDED=true` restores that both-sides loop.
+
+Logs go to `sxbot-paper-mm.jsonl`. Leave `SX_DRY_RUN=true`. Pull at kickoff.
+
+**Fair-line research (not wired).** Paper MM assumes a tape fill at our ghost price. Live making needs a fill *and* an edge vs a true number. SX's public book is not that number. The next research step is an external consensus / Pinnacle (or equivalent) fair line so we can shade just enough to get hit while staying +EV. That is background work; `sxbot mm` stays paused until that exists. Do not mix this with the taker bot's unique card.
+
+## Paper books: $5 flat and ⅝ Kelly
+
+Two unique books sit on the board for the same cards:
+
+- **$5 flat** — joins and MM ghost fills still *execute* at `SX_STAKE_USDC` (default 5). This is the comparable unique W–L / ROI.
+- **⅝ Kelly shadow** — every join / take / MM fill is also sized against a **$1000 paper bankroll** (between half-Kelly and ¾ Kelly). Fair probability is the book's mid — SX's public API does not send the orange/global line. No edge vs that mid → Kelly **skips** the card (not a loss). Cap is `min(5% of bankroll, SX_MAX_PER_MARKET_USDC)`.
+
+Botswana-style steam takes (`SX_FOLLOW_STYLE=take`) execute at a flat $5 on the *same* team as the makers. Stale leftover takes still use Kelly. Joins and MM stay flat. Do not go live from this shadow book. Do not score the taker bot as the complement of a maker quote.
+
+**Live-test gate:** after **100 unique settled** paper trades (follow + MM), the board flags `ready` only if **both** books are profitable. That flag is a tracker, not a deploy.
+
+**$200 CAD / ~145 USDC smoke (laptop, not Linode):** paste `live-test.env.example` into `.env`. Unique follow at **$1 floor / $4 Kelly cap**, pregame only, no maker bot. Tennis dogs stay in the book (same 2.20–3.50 unique as paper). Convert CAD → USDC and fund the SX **proxy**, not the EOA. `python -m sxbot run --live` from the laptop. Never put `SX_PRIVATE_KEY` in git or on this cloud agent.
+
+A ~150k-fill sample (Dec/Jan + Jun + late July, including tennis) is what `sxbot profiles` is for. In that sample: **BotswanaMC** is the only labeled wallet with large **net** P&L, mostly pregame soccer and NFL at pick’em prices (1.80–2.20). **GambleGuruGary** prints millions of gross “Won” and is still **net negative** — the 1.13 hammer is a weapon, not the book. **Tennis lost money** for both takers. **cypherprod** is mixed maker/taker and the only one who is net-positive *live*. **HedgeHog** is the two-sided MM (`SX_MM_TWO_SIDED=true`). Default `sxbot mm` is one-sided extract, not that book. Do not clone all four as one bot.
+
+## How a signal is built
+
+Each market is reduced to a two-sided view:
+
+- **Bid** on outcome one = best maker odds resting on outcome one
+- **Ask** on outcome one = `1 −` best maker odds resting on outcome two
+- **Mid** = average of those
+- **Imbalance** = `(size_one − size_two) / total_size`
+
+A **maker steam** is both sides shifting in the same direction. A **size rotation** is makers adding on one outcome and pulling the other. A **taker hit** is a one-sided size drop that the public tape explains. Conflicting steam vs rotation is dropped. Live orders (when you turn them on) go through the SX V3 path: EIP-712 `Order` signatures, `GTC` to join, `IOC` to take, and a heartbeat so resting quotes die if the process does.
+
+Docs used: [market making](https://docs.sx.bet/developers/market-making), [order book](https://docs.sx.bet/developers/order-book), [public trades](https://docs.sx.bet/developers/public-trades), [posting orders](https://docs.sx.bet/developers/posting-orders), [V3 rollout](https://docs.sx.bet/developers/new-in-v3).
+
+## Tests
+
+```bash
+pytest
+```
+
+## Risk
+
+This is experimental trading software for a peer-to-peer betting exchange, not a sportsbook. You can lose the entire stake. SX Bet is unavailable in some jurisdictions, including the United States. Paper trade first.
