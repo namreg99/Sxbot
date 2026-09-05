@@ -252,7 +252,9 @@ def test_record_roi_uses_settled_stake() -> None:
 def test_maker_ev_is_parked_size_not_a_fade() -> None:
     from sxbot.board import is_maker_ev
 
-    assert is_maker_ev({"motive": "maker_steam", "side": "outcome_one", "imbalance": 0})
+    assert not is_maker_ev({"motive": "maker_steam", "side": "outcome_one", "imbalance": 0})
+    assert is_maker_ev({"motive": "maker_steam", "side": "outcome_one", "imbalance": 0.4})
+    assert is_maker_ev({"motive": "take_stale", "side": "outcome_one", "imbalance": 0})
     assert is_maker_ev({"side": "outcome_two", "imbalance": -0.4})
     assert not is_maker_ev({"side": "outcome_one", "imbalance": -0.4, "motive": "tob_lag"})
 

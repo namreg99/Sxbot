@@ -4,7 +4,9 @@ SX_FOLLOW_STYLE:
 - join       — rest behind makers (default). Still take leftover crossed quotes.
 - take       — hit the informed side now (pay the spread, same team as the steam).
 - mixed      — take on strong steam/rotation; otherwise join.
-- take_first — hit the other side to get the same team. Do not sit as a maker.
+- take_first — hit the other side to get the same team, only when makers
+               have size on that side and the ask is close to the touch.
+               Do not sit as a maker.
 
 The follow-bot (`sxbot run`) uses maker bias to bet *with* the makers.
 Filling the heavy quotes (the other team) is not this strategy.
@@ -16,14 +18,21 @@ from __future__ import annotations
 from dataclasses import replace
 
 from sxbot.config import Settings
-from sxbot.filters import STEAM_DOG_STYLES, longshot_skip_reason, order_skip_reason, quote_style
+from sxbot.filters import (
+    STEAM_DOG_STYLES,
+    is_tennis,
+    longshot_skip_reason,
+    order_skip_reason,
+    quote_style,
+)
 from sxbot.flow import FlowReport, Motive, classify
 from sxbot.models import Action, Market, PublicTrade, Signal, Side
 from sxbot.orderbook import BookView
-from sxbot.units import ODDS_SCALE, OddsLadder, decimal_odds, taker_odds, to_prob
+from sxbot.units import ODDS_SCALE, OddsLadder, bps_of_odds, decimal_odds, taker_odds, to_prob
 
-# Same cutoff as the board "best priced" card. Non-EV shorts in this band
-# were the −32% / −44% unique slices; we fade them instead of taking them.
+# Same cutoff as the board "best priced" card. Tennis shorts in this band
+# with no maker size were −44% unique; we fade those to the in-band dog.
+# Soccer parked shorts are skipped instead (sample was tiny and green).
 _PRICED_SHORT_MAX = 1.80
 _FADE_REASON = "fade non-EV short"
 
@@ -134,6 +143,41 @@ def _size_on_side(imbalance: float, side: Side, min_imbalance: float) -> bool:
     return imbalance <= -min_imbalance
 
 
+def _maker_lean(view: BookView, side: Side, settings: Settings) -> bool:
+    """True when parked maker size is on `side` — the board's real EV check."""
+    return _size_on_side(view.imbalance, side, float(settings.min_imbalance or 0.15))
+
+
+def _take_through_too_wide(touch: int | None, take_price: int, max_bps: int) -> bool:
+    """Skip takes that pay a junk-wide spread vs the unique-follow touch."""
+    if not touch or take_price <= 0 or max_bps <= 0:
+        return False
+    worse = take_price - touch
+    if worse <= 0:
+        return False
+    return bps_of_odds(worse) > max_bps
+
+
+def _take_first_quality_ok(
+    report: FlowReport,
+    view: BookView,
+    take_price: int,
+    settings: Settings,
+) -> bool:
+    """Live take_first: same team as paper, but only the priced+EV slice.
+
+    Paper join can sit behind a steam with no inventory. Hitting the ask
+    without maker size was the −32% / −44% unique book. Paying more than
+    `max_take_through_bps` vs the touch is a different (worse) bet than paper.
+    """
+    if report.side is None:
+        return False
+    if not _maker_lean(view, report.side, settings):
+        return False
+    cap = int(getattr(settings, "max_take_through_bps", 250) or 0)
+    return not _take_through_too_wide(view.best(report.side), take_price, cap)
+
+
 def _non_ev_priced_short(
     market: Market,
     report: FlowReport,
@@ -142,9 +186,12 @@ def _non_ev_priced_short(
 ) -> bool:
     """Favorite (≤1.80) whose parked-depth side does not have maker size.
 
-    Unique tape: those shorts were −32% / tennis −44%. Opposite side is the fade.
+    Unique tape: tennis shorts were −44%. Opposite side is the fade.
+    Soccer not-EV was a tiny green sample — do not fade it.
     """
     if report.side is None:
+        return False
+    if not is_tennis(market):
         return False
     price = view.best(report.side)
     if not price:
@@ -153,8 +200,7 @@ def _non_ev_priced_short(
         return False
     if decimal_odds(to_prob(price)) > _PRICED_SHORT_MAX + 1e-9:
         return False
-    min_imb = float(settings.min_imbalance or 0.15)
-    return not _size_on_side(view.imbalance, report.side, min_imb)
+    return not _maker_lean(view, report.side, settings)
 
 
 def evaluate(
@@ -223,7 +269,9 @@ def evaluate(
                     take_price, settings, quote_style(market, take_price, settings)
                 )
             )
-            if not skip_tob_dog:
+            if not skip_tob_dog and _take_first_quality_ok(
+                report, curr, take_price, settings
+            ):
                 signal = _priced(
                     market,
                     report,

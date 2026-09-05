@@ -28,6 +28,9 @@ def apply_live_run(settings: Settings) -> Settings:
 
     Older live smokes set SX_SKIP_STYLES=tennis_dog. Unique follow still
     extracts that band (paper tennis_dog is green). --live turns the skip off.
+
+    Live also refuses steam with no maker size (the priced-not-EV slice)
+    and will not fade soccer parked-depth shorts.
     """
     keep = tuple(
         style
@@ -158,10 +161,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "run" and args.live:
         settings = apply_live_run(settings)
         print(
-            "LIVE take_first: same unique-follow team (including tennis dogs "
-            "and soccer/MLB steam dogs), HIT the other side (IOC). Parked-depth "
-            "tob_lag is off; non-EV priced shorts fade to the other side. "
-            "Takes do not sit on SX as offers. This mode does not post resting joins.",
+            "LIVE take_first: same unique-follow team, but only when makers "
+            "have size on that side (priced + EV). HIT the other side (IOC) "
+            "if the ask is within 250bp of the touch. Parked-depth tob_lag "
+            "is off. Tennis non-EV shorts fade to the dog; soccer/MLB parked "
+            "shorts are skipped, not faded. Takes do not sit on SX as offers.",
             flush=True,
         )
     if args.cmd == "summary":

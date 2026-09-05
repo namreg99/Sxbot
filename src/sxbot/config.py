@@ -134,6 +134,9 @@ class Settings:
     kelly_fraction: float = 0.625
     kelly_max_frac: float = 0.05
     kelly_on_takes: bool = True
+    # take_first: skip if the ask is more than this many implied-prob bps
+    # worse than the unique-follow touch. 250 = 2.5 percentage points.
+    max_take_through_bps: int = 250
 
     @classmethod
     def load(cls) -> Settings:
@@ -210,6 +213,7 @@ class Settings:
             kelly_fraction=float(os.getenv("SX_KELLY_FRACTION", "0.625")),
             kelly_max_frac=float(os.getenv("SX_KELLY_MAX_FRAC", "0.05")),
             kelly_on_takes=_bool("SX_KELLY_ON_TAKES", True),
+            max_take_through_bps=int(os.getenv("SX_MAX_TAKE_THROUGH_BPS", "250")),
         )
 
     @property

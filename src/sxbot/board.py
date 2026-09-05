@@ -33,7 +33,6 @@ log = logging.getLogger("sxbot.board")
 
 _TRADE_ACTIONS = {"join_maker", "take_stale", "take_flow", "mm_fill"}
 BEST_PRICED_MAX_DECIMAL = 1.80
-MAKER_EV_MOTIVES = {"maker_steam", "size_rotation", "take_stale", "mm_quote"}
 DEFAULT_MIN_IMBALANCE = 0.15
 LIVE_TEST_TRADES = 100
 # Follow styles we always show on the not-EV card, even at 0–0.
@@ -232,9 +231,14 @@ def is_best_priced(bet: dict[str, Any], *, max_decimal: float = BEST_PRICED_MAX_
 
 
 def is_maker_ev(row: dict[str, Any], *, min_imbalance: float = DEFAULT_MIN_IMBALANCE) -> bool:
-    """True when the quote sat with parked maker size / steam, not a fade."""
+    """True when the quote sat with parked maker size, not a steam label alone.
+
+    `maker_steam` without inventory was mixed into this card and made live
+    look like EV when it was the −32% priced-not-EV book. Leftover takes
+    and MM quotes still count by motive.
+    """
     motive = str(row.get("motive") or "")
-    if motive in MAKER_EV_MOTIVES:
+    if motive in {"take_stale", "mm_quote"}:
         return True
     try:
         imb = float(row.get("imbalance") or 0)
