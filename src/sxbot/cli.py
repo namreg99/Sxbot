@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "LIVE take_first: same unique-follow team (including tennis dogs "
             "and soccer/MLB steam dogs), HIT the other side (IOC). Parked-depth "
-            "tob_lag is off; non-EV priced shorts fade to the other side. "
+            "tob_lag is off; non-EV priced shorts are skipped. "
             "Takes do not sit on SX as offers. This mode does not post resting joins.",
             flush=True,
         )

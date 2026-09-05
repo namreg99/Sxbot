@@ -58,6 +58,40 @@ def test_pick_universe_prefers_quoteable_sports() -> None:
     assert [m.market_hash for m in picked] == ["mlb"]
 
 
+def test_pick_universe_reserves_soccer_against_tennis_flood() -> None:
+    now = 1_000
+    tennis = [
+        make_market(
+            market_hash=f"t{i}",
+            game_time=now + 10 + i,
+            sport_id=6,
+            sport_label="Tennis",
+            type=52,
+            league_label="ATP",
+            outcome_one=f"A{i}",
+            outcome_two=f"B{i}",
+        )
+        for i in range(20)
+    ]
+    soccer = make_market(
+        market_hash="soccer-late",
+        game_time=now + 8_000,
+        sport_id=5,
+        sport_label="Soccer",
+        type=1,
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    from sxbot.filters import quote_family
+
+    picked = pick_universe(tennis + [soccer], cap=12, now=now, watch_live=False, prefer=quote_family)
+    hashes = [m.market_hash for m in picked]
+    assert "soccer-late" in hashes
+    assert hashes.count("soccer-late") == 1
+    assert len(hashes) == 12
+
+
 class _FakeRisk:
     def __init__(self, joined: set[tuple[str, str]]) -> None:
         self.joined_sides = joined

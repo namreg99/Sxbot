@@ -6,8 +6,10 @@ from tests.conftest import make_book, make_market, make_settings
 
 
 def _signals(prev_book, curr_book, **setting_kw):
+    # NFL pick'em stays in-band at 1.80–2.20. Default make_market is type 226,
+    # which used to look like an MLB coin-flip (the band we just dropped).
     return evaluate(
-        make_market(),
+        make_market(type=8, sport_id=8, league_id=243, league_label="NFL", sport_label="Football"),
         analyze(prev_book),
         analyze(curr_book),
         make_settings(**setting_kw),
@@ -22,19 +24,19 @@ def test_unchanged_book_is_silent() -> None:
 
 def test_maker_reprice_joins_outcome_one() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     signals = _signals(prev, curr)
     joins = [s for s in signals if s.action is Action.JOIN_MAKER]
     assert len(joins) == 1
     assert joins[0].side is Side.OUTCOME_ONE
     assert joins[0].maker_odds == from_percent(52.875)
     assert joins[0].mid_move_bps > 0
-    assert joins[0].style == "mlb"
+    assert joins[0].style == "soccer"
 
 
 def test_maker_reprice_joins_outcome_two() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((47.0, 10),), o2=((52.0, 10),), version="2")
+    curr = make_book(o1=((47.0, 10),), o2=((52.0, 40),), version="2")
     signals = _signals(prev, curr)
     joins = [s for s in signals if s.action is Action.JOIN_MAKER]
     assert len(joins) == 1
@@ -77,7 +79,7 @@ def test_one_sided_book_no_signal() -> None:
 
 def test_take_style_hits_steam_instead_of_joining() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     signals = _signals(prev, curr, follow_style="take")
     assert len(signals) == 1
     assert signals[0].action is Action.TAKE_FLOW
@@ -89,7 +91,7 @@ def test_take_style_hits_steam_instead_of_joining() -> None:
 
 def test_take_first_takes_steam_instead_of_joining() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     signals = _signals(prev, curr, follow_style="take_first")
     assert len(signals) == 1
     assert signals[0].action is Action.TAKE_FLOW
@@ -99,14 +101,14 @@ def test_take_first_takes_steam_instead_of_joining() -> None:
 
 def test_take_first_does_not_join_when_take_is_off() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     assert _signals(prev, curr, follow_style="take_first", enable_take_stale=False) == []
 
 
 def test_take_first_keeps_tennis_short_when_take_pays_inside_1_12() -> None:
     """Eala @ 1.13 is unique tennis_short. Hitting the dog can be 1.11 — still take."""
     prev = make_book(o1=((85.0, 10),), o2=((14.0, 10),), version="1")
-    curr = make_book(o1=((88.5, 10),), o2=((10.0, 10),), version="2")
+    curr = make_book(o1=((88.5, 40),), o2=((10.0, 10),), version="2")
     market = make_market(
         type=52,
         sport_id=6,
@@ -208,8 +210,8 @@ def _tennis_short_market():
     )
 
 
-def test_fades_non_ev_tennis_short_tob_lag() -> None:
-    """Parked depth on a short, size on the dog → take/join the dog."""
+def test_skips_non_ev_tennis_short_tob_lag() -> None:
+    """Parked depth on a short with size on the dog is a skip, not a fade."""
     prev = make_book(o1=((62.0, 5),), o2=((37.0, 40),), version="1")
     curr = make_book(o1=((62.0, 1), (68.0, 6)), o2=((37.0, 40),), version="2")
     signals = evaluate(
@@ -219,13 +221,10 @@ def test_fades_non_ev_tennis_short_tob_lag() -> None:
         make_settings(join_tob_lag=False),
         OddsLadder(125),
     )
-    assert len(signals) == 1
-    assert signals[0].side is Side.OUTCOME_TWO
-    assert signals[0].style == "tennis_dog"
-    assert "fade non-EV short" in signals[0].reason
+    assert signals == []
 
 
-def test_take_first_fades_non_ev_tennis_short() -> None:
+def test_take_first_skips_non_ev_tennis_short() -> None:
     prev = make_book(o1=((62.0, 5),), o2=((37.0, 40),), version="1")
     curr = make_book(o1=((62.0, 1), (68.0, 6)), o2=((37.0, 40),), version="2")
     signals = evaluate(
@@ -235,10 +234,7 @@ def test_take_first_fades_non_ev_tennis_short() -> None:
         make_settings(join_tob_lag=False, follow_style="take_first"),
         OddsLadder(125),
     )
-    assert len(signals) == 1
-    assert signals[0].action is Action.TAKE_FLOW
-    assert signals[0].side is Side.OUTCOME_TWO
-    assert signals[0].style == "tennis_dog"
+    assert signals == []
 
 
 def test_tob_lag_join_takes_soccer_shorts() -> None:
@@ -268,7 +264,7 @@ def test_tob_lag_join_takes_soccer_shorts() -> None:
 
 def test_skips_totals_even_on_steam() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     market = make_market(type=28, outcome_one="Over 2.5", outcome_two="Under 2.5")
     from sxbot.orderbook import analyze
     from sxbot.strategy import evaluate
@@ -295,7 +291,7 @@ def test_skips_longshot_steam() -> None:
 
 def test_skips_not_tie() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     market = make_market(type=1, outcome_one="Tie", outcome_two="Not tie")
     from sxbot.orderbook import analyze
     from sxbot.strategy import evaluate
@@ -314,7 +310,7 @@ def test_skips_not_tie() -> None:
 
 def test_skips_npb_and_kbo() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     market = make_market(
         type=52,
         sport_id=3,
@@ -355,7 +351,7 @@ def test_skips_empty_book_flicker() -> None:
 
 def test_skips_futures_kickoff() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     market = make_market(game_time=int(__import__("time").time()) + 30 * 24 * 3600)
     signals = evaluate(
         market,
@@ -369,7 +365,7 @@ def test_skips_futures_kickoff() -> None:
 
 def test_tennis_dog_joins_in_band() -> None:
     prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
-    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    curr = make_book(o1=((32.0, 40),), o2=((67.0, 10),), version="2")
     market = make_market(
         type=3,
         sport_id=6,
@@ -393,7 +389,7 @@ def test_tennis_dog_joins_in_band() -> None:
 def test_take_first_takes_tennis_dog_steam() -> None:
     """Same unique-follow dog as paper — IOC take, do not skip the 2.20–3.50 band."""
     prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
-    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    curr = make_book(o1=((32.0, 40),), o2=((67.0, 10),), version="2")
     market = make_market(
         type=3,
         sport_id=6,
@@ -416,9 +412,43 @@ def test_take_first_takes_tennis_dog_steam() -> None:
     assert signals[0].side is Side.OUTCOME_ONE
 
 
-def test_soccer_pickem_is_not_quoted() -> None:
+def test_mlb_pickem_is_not_quoted() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
+    signals = evaluate(
+        _mlb_ml_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def test_mlb_short_joins_on_steam() -> None:
+    prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
+    curr = make_book(o1=((65.0, 40),), o2=((34.0, 10),), version="2")
+    signals = evaluate(
+        _mlb_ml_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(),
+        OddsLadder(125),
+    )
+    assert signals
+    assert signals[0].style == "mlb"
+    assert signals[0].motive == "maker_steam"
+
+
+def test_steam_without_maker_size_is_skipped() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    assert _signals(prev, curr) == []
+
+
+def test_soccer_pickem_is_not_quoted() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 40),), o2=((46.0, 10),), version="2")
     market = make_market(
         type=1,
         sport_id=5,
@@ -466,7 +496,7 @@ def _mlb_ml_market():
 
 def test_soccer_dog_joins_on_steam() -> None:
     prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
-    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    curr = make_book(o1=((32.0, 40),), o2=((67.0, 10),), version="2")
     signals = evaluate(
         _soccer_dog_market(),
         analyze(prev),
@@ -482,7 +512,7 @@ def test_soccer_dog_joins_on_steam() -> None:
 
 def test_take_first_takes_soccer_dog_steam() -> None:
     prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
-    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    curr = make_book(o1=((32.0, 40),), o2=((67.0, 10),), version="2")
     signals = evaluate(
         _soccer_dog_market(),
         analyze(prev),
@@ -498,7 +528,7 @@ def test_take_first_takes_soccer_dog_steam() -> None:
 
 def test_take_first_takes_mlb_dog_steam() -> None:
     prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
-    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    curr = make_book(o1=((32.0, 40),), o2=((67.0, 10),), version="2")
     signals = evaluate(
         _mlb_ml_market(),
         analyze(prev),
@@ -535,7 +565,7 @@ def test_tob_lag_skips_soccer_and_mlb_dogs() -> None:
 
 def test_soccer_type1_joins_favorite_band() -> None:
     prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
-    curr = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="2")
+    curr = make_book(o1=((65.0, 40),), o2=((34.0, 10),), version="2")
     market = make_market(
         type=1,
         sport_id=5,

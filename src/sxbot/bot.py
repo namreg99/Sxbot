@@ -498,6 +498,40 @@ class Bot:
         )
 
 
+_WATCH_FAMILIES = ("soccer", "mlb", "tennis")
+
+
+def _reserve_quote_families(
+    markets: list[Market],
+    cap: int,
+    prefer: Callable[[Market], object],
+) -> list[Market]:
+    """Split the watch list across soccer / MLB / tennis.
+
+    Soonest-kickoff alone fills the cap with tennis. Soccer then never gets
+    scanned, which is why unique days looked like 17 tennis / 11 MLB / 2 soccer.
+    """
+    hot = [m for m in markets if prefer(m)]
+    cold = [m for m in markets if not prefer(m)]
+    by_fam: dict[str, list[Market]] = {}
+    for market in hot:
+        fam = str(prefer(market) or "")
+        by_fam.setdefault(fam, []).append(market)
+    families = [fam for fam in _WATCH_FAMILIES if by_fam.get(fam)]
+    per = max(cap // max(len(families), 1), 1)
+    reserved: list[Market] = []
+    leftover: list[Market] = []
+    for fam in families:
+        bucket = by_fam[fam]
+        reserved.extend(bucket[:per])
+        leftover.extend(bucket[per:])
+    for fam, bucket in by_fam.items():
+        if fam not in _WATCH_FAMILIES:
+            leftover.extend(bucket)
+    leftover.sort(key=lambda m: m.game_time or 10**18)
+    return reserved + leftover + cold
+
+
 def pick_universe(
     markets: list[Market],
     cap: int,
@@ -510,16 +544,15 @@ def pick_universe(
 
     `prefer` is an optional callable(market) -> truthy for sports we actually
     quote (MLB / soccer / NFL / tennis). Those fill the cap first so NPB/KBO
-    tonight cannot crowd out the styles we bet.
+    tonight cannot crowd out the styles we bet. Soccer / MLB / tennis each
+    get an equal slice so ATP challengers cannot starve soccer.
     """
     pregame = [m for m in markets if not m.is_live(now)]
     live = [m for m in markets if m.is_live(now)]
     pregame.sort(key=lambda m: m.game_time or 10**18)
     live.sort(key=lambda m: m.game_time or 0, reverse=True)
     if prefer is not None:
-        hot = [m for m in pregame if prefer(m)]
-        cold = [m for m in pregame if not prefer(m)]
-        pregame = hot + cold
+        pregame = _reserve_quote_families(pregame, cap, prefer)
     if not watch_live:
         return pregame[:cap]
     live_slots = min(len(live), max(8, cap // 5)) if cap >= 10 else min(len(live), max(cap // 2, 1))

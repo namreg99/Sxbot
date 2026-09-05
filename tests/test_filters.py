@@ -15,11 +15,12 @@ from sxbot.units import from_percent
 from tests.conftest import make_market, make_settings
 
 
-def test_quote_style_mlb_pickem() -> None:
+def test_quote_style_mlb_shorts_not_pickem() -> None:
     market = make_market(type=226, sport_id=3, league_label="MLB", league_id=3, sport_label="Baseball")
     assert quote_family(market) == "mlb"
-    assert quote_style(market, from_percent(52.0), make_settings()) == "mlb"
-    assert quote_style(market, from_percent(70.0), make_settings()) is None
+    assert quote_style(market, from_percent(52.0), make_settings()) is None
+    assert quote_style(market, from_percent(70.0), make_settings()) == "mlb"
+    assert quote_style(market, from_percent(40.0), make_settings()) == "mlb_dog"
 
 
 def test_quote_style_soccer_and_nfl() -> None:
@@ -54,7 +55,8 @@ def test_quote_style_soccer_and_nfl() -> None:
 def test_quote_style_mlb_dog_is_moneyline_only() -> None:
     ml = make_market(type=226, sport_id=3, league_label="MLB", league_id=3, sport_label="Baseball")
     assert quote_style(ml, from_percent(40.0), make_settings()) == "mlb_dog"
-    assert quote_style(ml, from_percent(52.0), make_settings()) == "mlb"
+    assert quote_style(ml, from_percent(52.0), make_settings()) is None
+    assert quote_style(ml, from_percent(65.0), make_settings()) == "mlb"
     spread = make_market(
         type=342,
         sport_id=3,
@@ -65,7 +67,8 @@ def test_quote_style_mlb_dog_is_moneyline_only() -> None:
         outcome_two="Pirates -1.5",
     )
     assert quote_style(spread, from_percent(40.0), make_settings()) is None
-    assert quote_style(spread, from_percent(52.0), make_settings()) == "mlb"
+    assert quote_style(spread, from_percent(52.0), make_settings()) is None
+    assert quote_style(spread, from_percent(70.0), make_settings()) == "mlb"
 
 
 def test_quote_style_tennis_bands() -> None:

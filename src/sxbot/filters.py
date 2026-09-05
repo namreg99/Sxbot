@@ -216,14 +216,15 @@ def _in_band(dec: float, low: float, high: float) -> bool:
 def quote_style(market: Market, price: int, settings: Settings) -> str | None:
     """Which paper log a join belongs in, or None if we should not quote.
 
-    mlb           — MLB ML/spread 1.80–2.20
+    mlb           — MLB ML/spread favs 1.12–1.80 (steam/rotation)
     mlb_dog       — MLB moneyline 2.20–3.50 (steam/rotation only; flat $1 live)
     soccer        — soccer favs 1.12–1.80, plus NFL pick'em 1.80–2.20
     soccer_dog    — soccer 2.20–3.50 (steam/rotation only; flat $1 live)
     tennis_short  — tennis 1.12–1.80
     tennis_dog    — tennis 2.20–3.50, pregame entry, live exit
 
-    Soccer pick'em 1.80–2.20 is dropped (unique follow was coin-flip / slightly red).
+    Soccer pick'em 1.80–2.20 is dropped (coin-flip / slightly red).
+    MLB pick'em 1.80–2.20 is dropped too — that band is every MLB game.
     """
     if price <= 0:
         return None
@@ -240,7 +241,7 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
             style = STYLE_SOCCER_DOG
     elif is_mlb(market) and market.type == MLB_MONEYLINE_TYPE and _in_band(dec, 2.20, dog_hi):
         style = STYLE_MLB_DOG
-    elif is_mlb(market) and _in_band(dec, 1.80, 2.20):
+    elif is_mlb(market) and _in_band(dec, 1.12, 1.80):
         style = "mlb"
     elif is_nfl(market) and _in_band(dec, 1.80, 2.20):
         style = "soccer"
@@ -264,7 +265,7 @@ def mm_quote_style(market: Market, price: int) -> str | None:
     """Where pregame *maker fills* were not red. Not the follow-bot bands.
 
     Pick'em (1.80–2.20) is the worst maker bucket in soccer, MLB ML, and tennis.
-    Follow-bot soccer pick'em is dropped; NFL/MLB pick'em still steam-join.
+    Follow-bot soccer and MLB pick'em are dropped; NFL pick'em still steam-join.
     """
     if price <= 0:
         return None

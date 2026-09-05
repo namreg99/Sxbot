@@ -13,8 +13,6 @@ The maker-bot (`sxbot mm`) is a separate process and stays a maker.
 
 from __future__ import annotations
 
-from dataclasses import replace
-
 from sxbot.config import Settings
 from sxbot.filters import STEAM_DOG_STYLES, longshot_skip_reason, order_skip_reason, quote_style
 from sxbot.flow import FlowReport, Motive, classify
@@ -23,9 +21,8 @@ from sxbot.orderbook import BookView
 from sxbot.units import ODDS_SCALE, OddsLadder, decimal_odds, taker_odds, to_prob
 
 # Same cutoff as the board "best priced" card. Non-EV shorts in this band
-# were the −32% / −44% unique slices; we fade them instead of taking them.
-_PRICED_SHORT_MAX = 1.80
-_FADE_REASON = "fade non-EV short"
+# were the −32% / −44% unique slices. We skip them (quality over quantity);
+# fading them into extra tennis dogs was more volume, not better bets.
 
 
 def _join_odds(view: BookView, side: Side, ladder: OddsLadder, ticks_behind: int) -> int | None:
@@ -134,27 +131,9 @@ def _size_on_side(imbalance: float, side: Side, min_imbalance: float) -> bool:
     return imbalance <= -min_imbalance
 
 
-def _non_ev_priced_short(
-    market: Market,
-    report: FlowReport,
-    view: BookView,
-    settings: Settings,
-) -> bool:
-    """Favorite (≤1.80) whose parked-depth side does not have maker size.
-
-    Unique tape: those shorts were −32% / tennis −44%. Opposite side is the fade.
-    """
-    if report.side is None:
-        return False
-    price = view.best(report.side)
-    if not price:
-        return False
-    if quote_style(market, price, settings) is None:
-        return False
-    if decimal_odds(to_prob(price)) > _PRICED_SHORT_MAX + 1e-9:
-        return False
-    min_imb = float(settings.min_imbalance or 0.15)
-    return not _size_on_side(view.imbalance, report.side, min_imb)
+def _makers_on_side(view: BookView, side: Side, settings: Settings) -> bool:
+    """True when parked maker size is already on `side` (the unique-follow lean)."""
+    return _size_on_side(view.imbalance, side, float(settings.min_imbalance or 0.15))
 
 
 def evaluate(
@@ -179,21 +158,17 @@ def evaluate(
     ):
         return []
 
+    if report.motive is Motive.TOB_LAG and not settings.join_tob_lag:
+        return []
+    if report.motive in {Motive.MAKER_STEAM, Motive.SIZE_ROTATION} and not _makers_on_side(
+        curr, report.side, settings
+    ):
+        return []
+
     follow = (settings.follow_style or "join").strip().lower()
     spread_bps = curr.spread_bps()
     wide_enough = spread_bps is not None and spread_bps >= settings.min_spread_bps
     signals: list[Signal] = []
-    faded = False
-    if report.motive is Motive.TOB_LAG and report.side is not None:
-        if _non_ev_priced_short(market, report, curr, settings):
-            report = replace(
-                report,
-                side=report.side.opposite(),
-                reasons=(*report.reasons, _FADE_REASON),
-            )
-            faded = True
-        elif not settings.join_tob_lag:
-            return []
 
     if report.motive is Motive.CROSSED and settings.enable_take_stale:
         price = _take_against(curr, report.side)
@@ -206,7 +181,7 @@ def evaluate(
                 return signals
 
     take_first_motives = {Motive.MAKER_STEAM, Motive.SIZE_ROTATION}
-    if settings.join_tob_lag or faded:
+    if settings.join_tob_lag:
         take_first_motives.add(Motive.TOB_LAG)
 
     if (
@@ -218,7 +193,6 @@ def evaluate(
         if take_price is not None:
             skip_tob_dog = (
                 report.motive is Motive.TOB_LAG
-                and not faded
                 and not _tob_lag_join_ok(
                     take_price, settings, quote_style(market, take_price, settings)
                 )
@@ -260,7 +234,7 @@ def evaluate(
         return signals
 
     join_motives = {Motive.MAKER_STEAM, Motive.SIZE_ROTATION}
-    if settings.join_tob_lag or faded:
+    if settings.join_tob_lag:
         join_motives.add(Motive.TOB_LAG)
     if settings.enable_join_maker and report.motive in join_motives and (
         wide_enough or report.motive is not Motive.TOB_LAG
@@ -271,10 +245,8 @@ def evaluate(
                 market, report, curr, Action.JOIN_MAKER, price, settings, crossed=curr.crossed
             )
             if signal is not None:
-                if (
-                    report.motive is Motive.TOB_LAG
-                    and not faded
-                    and not _tob_lag_join_ok(price, settings, signal.style)
+                if report.motive is Motive.TOB_LAG and not _tob_lag_join_ok(
+                    price, settings, signal.style
                 ):
                     return signals
                 signals.append(signal)
