@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 from sxbot.rollout import MAINNET_API, TESTNET_API
 
 # 1 = soccer 2-way (Team / Not Team). 226 = MLB ML. 52 = team vs team.
-# 342/3 = spreads. Totals (2, 28) stay out of the default order universe.
-DEFAULT_MARKET_TYPES = (1, 226, 52, 342, 3)
+# 342/3 = spreads. 2/28/236 = totals (paper track; live does not take).
+DEFAULT_MARKET_TYPES = (1, 226, 52, 342, 3, 2, 28, 236)
 # Football, basketball, baseball, hockey, soccer, tennis.
 DEFAULT_SPORT_IDS = (8, 1, 3, 2, 5, 6)
 

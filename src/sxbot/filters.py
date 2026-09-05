@@ -17,8 +17,20 @@ from sxbot.wallets import SPORT_BASEBALL, SPORT_FOOTBALL, SPORT_SOCCER, SPORT_TE
 
 TOTAL_TYPES = {2, 28, 236}
 # Paper styles. Each `sxbot run` join goes to sxbot-paper-{style}.jsonl.
-QUOTE_STYLES = ("mlb", "mlb_dog", "soccer", "soccer_dog", "tennis_short", "tennis_dog", "mm")
+QUOTE_STYLES = (
+    "mlb",
+    "mlb_dog",
+    "soccer",
+    "soccer_dog",
+    "tennis_short",
+    "tennis_dog",
+    "totals",
+    "mm",
+)
 STYLE_MM = "mm"
+STYLE_TOTALS = "totals"
+# Research books: unique-follow is logged, never sent as a live order.
+TRACK_ONLY_STYLES = frozenset({STYLE_TOTALS})
 
 # Type 226 is SX's MLB moneyline. Type 1 is soccer Team / Not Team.
 MLB_MONEYLINE_TYPE = 226
@@ -91,6 +103,14 @@ def is_not_tie(market: Market) -> bool:
     o1 = (market.outcome_one or "").lower()
     o2 = (market.outcome_two or "").lower()
     return "not tie" in o1 or "not tie" in o2 or o1 in {"tie", "not tie"} or o2 in {"tie", "not tie"}
+
+
+def is_total(market: Market) -> bool:
+    o1 = (market.outcome_one or "").lower()
+    o2 = (market.outcome_two or "").lower()
+    if market.type in TOTAL_TYPES:
+        return True
+    return "over" in o1 or "under" in o1 or "over" in o2 or "under" in o2
 
 
 def is_mlb(market: Market) -> bool:
@@ -189,6 +209,8 @@ def mm_family(market: Market) -> str | None:
     Soccer type-52 (Team / Team) and NFL making were red in the archive.
     Basketball pregame making was red. Totals stay out.
     """
+    if is_total(market):
+        return None
     if is_soccer_ml(market) and market.type == SOCCER_TWO_WAY_TYPE:
         return "soccer"
     if is_mlb(market) and market.type in {MLB_MONEYLINE_TYPE, MLB_SPREAD_TYPE}:
@@ -200,6 +222,8 @@ def mm_family(market: Market) -> str | None:
 
 def quote_family(market: Market) -> str | None:
     """Sport/league bucket for scan preference. Price bands are applied later."""
+    if is_total(market):
+        return STYLE_TOTALS
     if is_soccer_ml(market):
         return "soccer"
     if is_mlb(market):
@@ -224,6 +248,7 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
     soccer_dog    — soccer 2.20–3.50 (steam/rotation only; flat $1 live)
     tennis_short  — tennis 1.12–1.80
     tennis_dog    — tennis 2.20–3.50, pregame entry, live exit
+    totals        — Over/Under 1.12–2.20 (paper track only; never a live take)
 
     Soccer pick'em 1.80–2.20 is dropped (unique follow was coin-flip / slightly red).
     """
@@ -235,7 +260,10 @@ def quote_style(market: Market, price: int, settings: Settings) -> str | None:
     cap = float(settings.max_order_decimal or 3.5)
     dog_hi = min(3.50, cap) if cap > 0 else 3.50
     style: str | None = None
-    if is_soccer_ml(market):
+    if is_total(market):
+        if _in_band(dec, 1.12, 2.20):
+            style = STYLE_TOTALS
+    elif is_soccer_ml(market):
         if _in_band(dec, 1.12, 1.80):
             style = "soccer"
         elif _in_band(dec, 2.20, dog_hi):

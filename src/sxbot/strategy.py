@@ -23,6 +23,7 @@ from sxbot.filters import (
     STEAM_DOG_STYLES,
     STYLE_MLB,
     STYLE_TENNIS_SHORT,
+    TRACK_ONLY_STYLES,
     longshot_skip_reason,
     order_skip_reason,
     quote_style,
@@ -289,6 +290,8 @@ def evaluate(
 
     follow_price = curr.best(report.side) if report.side is not None else None
     style = quote_style(market, follow_price, settings) if follow_price else None
+    if style in TRACK_ONLY_STYLES:
+        follow = "join"
     if report.motive in {Motive.MAKER_STEAM, Motive.SIZE_ROTATION, Motive.TOB_LAG}:
         if _maker_lean_required(style) and not _maker_lean(curr, report.side, settings):
             return []

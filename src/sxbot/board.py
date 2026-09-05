@@ -36,7 +36,7 @@ BEST_PRICED_MAX_DECIMAL = 1.80
 DEFAULT_MIN_IMBALANCE = 0.15
 LIVE_TEST_TRADES = 100
 # Follow styles we always show on the not-EV card, even at 0–0.
-NOT_EV_STYLES = ("mlb", "mlb_dog", "soccer", "soccer_dog", "tennis_short", "tennis_dog")
+NOT_EV_STYLES = ("mlb", "mlb_dog", "soccer", "soccer_dog", "tennis_short", "tennis_dog", "totals")
 
 
 def _utc(ts: int | float | None) -> str:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from sxbot.config import Settings
+from sxbot.filters import TRACK_ONLY_STYLES
 from sxbot.journal import live_log_for, paper_log_for
 from sxbot.fills import live_entry_filled, order_ids
 from sxbot.kelly import UNIQUE_BANKROLL_USDC, UNIQUE_FLAT_USDC, UNIQUE_KELLY_FRACTION, tracker_kelly_usdc
@@ -44,8 +45,6 @@ class Executor:
         self.paper_path = Path(paper_path or settings.paper_log)
         self._paper_path_locked = paper_path is not None
         self._account = None
-        if not settings.dry_run:
-            self._account = _load_account(settings.private_key)
 
     def execute(
         self,
@@ -80,6 +79,20 @@ class Executor:
         if extra:
             record.update(extra)
         self._stamp_books(record, signal)
+        if (signal.style or "") in TRACK_ONLY_STYLES and not self.settings.dry_run:
+            log.info(
+                "TRACK %s %s %s @ %.3f%%  %s",
+                signal.action.value,
+                signal.side.value,
+                signal.market.label,
+                record["odds_pct"],
+                signal.reason,
+            )
+            record["track_only"] = True
+            record["dry_run"] = True
+            self._append(record, signal)
+            record["live_filled"] = False
+            return record
         if self.settings.dry_run:
             log.info(
                 "PAPER %s %s %s @ %.3f%%  %s",
@@ -105,8 +118,10 @@ class Executor:
             self._append(record, signal)
             return record
 
-        if self.client is None or self._account is None:
+        if self.client is None:
             raise RuntimeError("live trading requires SX_API_KEY and SX_PRIVATE_KEY")
+        if self._account is None:
+            self._account = _load_account(self.settings.private_key)
 
         time_in_force = "GTC" if signal.action is Action.JOIN_MAKER else "IOC"
         order = self._sign_order(signal, stake, time_in_force)
@@ -211,7 +226,7 @@ class Executor:
         path = self.paper_path
         if not self._paper_path_locked:
             style = (signal.style if signal is not None else "") or "legacy"
-            if self.settings.dry_run:
+            if self.settings.dry_run or style in TRACK_ONLY_STYLES:
                 path = paper_log_for(self.paper_path, style)
             else:
                 path = live_log_for(self.paper_path, style)

@@ -79,6 +79,23 @@ def test_quote_style_tennis_bands() -> None:
     assert quote_style(tennis, from_percent(32.0), skipped) is None
 
 
+def test_quote_style_totals_not_mlb() -> None:
+    market = make_market(
+        type=28,
+        sport_id=3,
+        league_label="MLB",
+        league_id=3,
+        sport_label="Baseball",
+        outcome_one="Over 8.5",
+        outcome_two="Under 8.5",
+    )
+    assert quote_family(market) == "totals"
+    assert quote_style(market, from_percent(52.0), make_settings()) == "totals"
+    assert quote_style(market, from_percent(30.0), make_settings()) is None
+    skipped = make_settings(skip_styles=("totals",))
+    assert quote_style(market, from_percent(52.0), skipped) is None
+
+
 def test_quote_family_skips_npb_kbo() -> None:
     npb = make_market(type=52, sport_id=3, league_id=19, league_label="NPB", sport_label="Baseball")
     kbo = make_market(type=52, sport_id=3, league_id=20, league_label="KBO League", sport_label="Baseball")

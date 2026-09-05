@@ -14,7 +14,7 @@ from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
 from sxbot.fills import order_ids
-from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, longshot_skip_reason, quote_family
+from sxbot.filters import STYLE_TENNIS_DOG, TRACK_ONLY_STYLES, kickoff_skip_reason, longshot_skip_reason, quote_family
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
 from sxbot.kelly import TAKE_ACTIONS
 from sxbot.journal import load_follow_live, load_follow_paper
@@ -274,6 +274,8 @@ class Bot:
         style = _side_quote_style(market, view, side, self.settings, price)
         if not style:
             return 0
+        if style in TRACK_ONLY_STYLES:
+            return 0
         if not _live_take_style_ok(style):
             log.info(
                 "unique %s %s — tennis_short not taken live",
@@ -332,7 +334,7 @@ class Bot:
         if price is None or longshot_skip_reason(price, self.settings):
             return 0
         style = _side_quote_style(market, view, side, self.settings, price)
-        if not style or not _live_take_style_ok(style):
+        if not style or style in TRACK_ONLY_STYLES or not _live_take_style_ok(style):
             return 0
         if _maker_lean_required(style) and not _maker_lean(view, side, self.settings):
             return 0
@@ -400,6 +402,8 @@ class Bot:
             }
         record = self.executor.execute(signal, stake, extra=extra or None)
         self.risk.mark_chosen(signal)
+        if record.get("track_only"):
+            return 1
         if self.settings.dry_run or record.get("live_filled"):
             self.risk.record(signal, stake)
             return 1

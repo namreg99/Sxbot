@@ -389,21 +389,50 @@ def test_tob_lag_join_takes_soccer_shorts() -> None:
 
 def test_skips_totals_even_on_steam() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 30),), o2=((46.0, 5),), version="2")
     market = make_market(type=28, outcome_one="Over 2.5", outcome_two="Under 2.5")
-    from sxbot.orderbook import analyze
-    from sxbot.strategy import evaluate
-    from sxbot.units import OddsLadder
-    from tests.conftest import make_settings
-
     signals = evaluate(
         market,
         analyze(prev),
         analyze(curr),
-        make_settings(),
+        make_settings(skip_totals=True),
         OddsLadder(125),
     )
     assert signals == []
+
+
+def test_tracks_totals_on_steam_with_size() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 30),), o2=((46.0, 5),), version="2")
+    market = make_market(
+        type=28,
+        sport_id=3,
+        league_label="MLB",
+        league_id=3,
+        sport_label="Baseball",
+        outcome_one="Over 8.5",
+        outcome_two="Under 8.5",
+    )
+    join = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(skip_totals=False, follow_style="join"),
+        OddsLadder(125),
+    )
+    live = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(skip_totals=False, follow_style="take_first"),
+        OddsLadder(125),
+    )
+    assert len(join) == 1
+    assert join[0].style == "totals"
+    assert join[0].action is Action.JOIN_MAKER
+    assert len(live) == 1
+    assert live[0].style == "totals"
+    assert live[0].action is Action.JOIN_MAKER
 
 
 def test_skips_longshot_steam() -> None:

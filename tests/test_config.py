@@ -41,6 +41,10 @@ def test_live_run_keeps_tennis_dog_unique() -> None:
     assert live.skip_styles == ("mlb",)
     assert live.join_tob_lag is False
     assert live.max_take_through_bps == 250
+    assert live.skip_totals is False
+    assert 28 in live.market_types
+    assert 2 in live.market_types
+    assert 236 in live.market_types
 
 
 def test_load_dry_run_strips_null_bytes(monkeypatch) -> None:

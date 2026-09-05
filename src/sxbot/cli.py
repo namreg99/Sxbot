@@ -11,7 +11,7 @@ from sxbot.api import SxApiError, SxClient, index_markets, lookup_market
 from sxbot.board import build_snapshot, render_text, serve_board
 from sxbot.bot import Bot, describe_book, format_radar, print_scan, scan_radar_window
 from sxbot.config import Settings
-from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG
+from sxbot.filters import STYLE_MM, STYLE_TENNIS_DOG, TOTAL_TYPES
 from sxbot.flow import Motive
 from sxbot.fingerprint import format_profiles, profile_wallet
 from sxbot.grade import format_grade, grade_paper
@@ -31,6 +31,7 @@ def apply_live_run(settings: Settings) -> Settings:
 
     Live also refuses tennis_short takes (that book is −ROI even with size)
     and follows MLB pick'em steam without requiring parked maker size.
+    Totals are fetched and paper-tracked; they are never a live take.
     Pregame paper uniques are a thesis to confirm, not a live fill.
     """
     keep = tuple(
@@ -38,6 +39,8 @@ def apply_live_run(settings: Settings) -> Settings:
         for style in settings.skip_styles
         if str(style).strip().lower() != STYLE_TENNIS_DOG
     )
+    types = tuple(settings.market_types or ())
+    extra = tuple(t for t in sorted(TOTAL_TYPES) if t not in types)
     return replace(
         settings,
         dry_run=False,
@@ -45,6 +48,8 @@ def apply_live_run(settings: Settings) -> Settings:
         enable_take_stale=True,
         skip_styles=keep,
         join_tob_lag=False,
+        skip_totals=False,
+        market_types=types + extra,
     )
 
 

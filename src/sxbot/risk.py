@@ -8,6 +8,7 @@ from sxbot.filters import (
     FLAT_LIVE_DOG_STYLES,
     STYLE_MM,
     STYLE_TENNIS_DOG,
+    TRACK_ONLY_STYLES,
     soccer_team_lock_token,
     soccer_team_lock_token_from_row,
 )
@@ -148,7 +149,7 @@ class RiskGate:
             if style:
                 self.quoted_style[market] = style
             event_id = str(row.get("event_id") or "")
-            if event_id:
+            if event_id and style not in TRACK_ONLY_STYLES:
                 self.event_markets.setdefault(event_id, set()).add(market)
             if thesis_only:
                 self.thesis_sides[market] = side
@@ -204,6 +205,15 @@ class RiskGate:
         if signal.action is Action.CANCEL:
             return None
         if signal.action is Action.MM_FILL:
+            return None
+        if (signal.style or "") in TRACK_ONLY_STYLES:
+            key = (market_hash, signal.side.value)
+            if key in self.joined_sides or key in self.chosen_sides:
+                return "already on this side"
+            if self.settings.one_side_per_market and any(
+                item[0] == market_hash and item != key for item in (self.joined_sides | self.chosen_sides)
+            ):
+                return "already in this market"
             return None
         if (
             not self.settings.allow_live
@@ -308,10 +318,11 @@ class RiskGate:
         if signal.style:
             self.quoted_style[market_hash] = signal.style
         event_id = str(signal.market.event_id or "")
-        if event_id:
+        if event_id and (signal.style or "") not in TRACK_ONLY_STYLES:
             self.event_markets.setdefault(event_id, set()).add(market_hash)
         self.quoted_kickoff[market_hash] = int(signal.market.game_time or 0)
-        self._add_team_lock(market_hash, soccer_team_lock_token(signal.market, signal.side))
+        if (signal.style or "") not in TRACK_ONLY_STYLES:
+            self._add_team_lock(market_hash, soccer_team_lock_token(signal.market, signal.side))
 
     def record(self, signal: Signal, stake: int | None = None) -> None:
         market_hash = signal.market.market_hash

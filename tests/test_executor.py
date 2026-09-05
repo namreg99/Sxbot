@@ -180,3 +180,31 @@ def test_unstyled_write_does_not_recreate_main_dump(tmp_path) -> None:
     legacy = tmp_path / "sxbot-paper-legacy.jsonl"
     assert legacy.exists()
     assert "join_maker" in legacy.read_text(encoding="utf-8")
+
+
+def test_live_totals_write_paper_not_live_log(tmp_path) -> None:
+    paper = tmp_path / "sxbot-paper.jsonl"
+    settings = make_settings(paper_log=str(paper), dry_run=False)
+    executor = Executor(settings, _meta(), client=None)
+    signal = Signal(
+        market=make_market(
+            type=28,
+            outcome_one="Over 8.5",
+            outcome_two="Under 8.5",
+        ),
+        side=Side.OUTCOME_ONE,
+        action=Action.JOIN_MAKER,
+        maker_odds=from_percent(52.0),
+        reason="makers shifted",
+        mid_move_bps=80,
+        imbalance=0.4,
+        confidence=0.8,
+        style="totals",
+    )
+    record = executor.execute(signal, 5_000_000)
+    assert record["track_only"] is True
+    assert record["live_filled"] is False
+    tracked = tmp_path / "sxbot-paper-totals.jsonl"
+    assert tracked.exists()
+    assert not (tmp_path / "sxbot-live-totals.jsonl").exists()
+    assert '"style": "totals"' in tracked.read_text(encoding="utf-8")
