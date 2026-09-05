@@ -40,6 +40,7 @@ def apply_live_run(settings: Settings) -> Settings:
         follow_style="take_first",
         enable_take_stale=True,
         skip_styles=keep,
+        join_tob_lag=False,
     )
 
 
@@ -158,8 +159,9 @@ def main(argv: list[str] | None = None) -> int:
         settings = apply_live_run(settings)
         print(
             "LIVE take_first: same unique-follow team (including tennis dogs "
-            "and soccer/MLB steam dogs), HIT the other side (IOC). Takes do "
-            "not sit on SX as offers. This mode does not post resting joins.",
+            "and soccer/MLB steam dogs), HIT the other side (IOC). Parked-depth "
+            "tob_lag is off; non-EV priced shorts fade to the other side. "
+            "Takes do not sit on SX as offers. This mode does not post resting joins.",
             flush=True,
         )
     if args.cmd == "summary":

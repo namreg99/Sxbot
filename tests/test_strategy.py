@@ -174,6 +174,73 @@ def test_tob_lag_join_skips_dogs() -> None:
     assert signals == []
 
 
+def test_tob_lag_is_skipped_when_join_disabled() -> None:
+    prev = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="1")
+    curr = make_book(o1=((65.0, 1), (70.0, 20)), o2=((34.0, 10),), version="2")
+    market = make_market(
+        type=1,
+        sport_id=5,
+        sport_label="Soccer",
+        league_id=1,
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    signals = evaluate(
+        market,
+        analyze(prev),
+        analyze(curr),
+        make_settings(join_tob_lag=False),
+        OddsLadder(125),
+    )
+    assert signals == []
+
+
+def _tennis_short_market():
+    return make_market(
+        type=52,
+        sport_id=6,
+        sport_label="Tennis",
+        league_id=2,
+        league_label="ATP",
+        outcome_one="Player A",
+        outcome_two="Player B",
+    )
+
+
+def test_fades_non_ev_tennis_short_tob_lag() -> None:
+    """Parked depth on a short, size on the dog → take/join the dog."""
+    prev = make_book(o1=((62.0, 5),), o2=((37.0, 40),), version="1")
+    curr = make_book(o1=((62.0, 1), (68.0, 6)), o2=((37.0, 40),), version="2")
+    signals = evaluate(
+        _tennis_short_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(join_tob_lag=False),
+        OddsLadder(125),
+    )
+    assert len(signals) == 1
+    assert signals[0].side is Side.OUTCOME_TWO
+    assert signals[0].style == "tennis_dog"
+    assert "fade non-EV short" in signals[0].reason
+
+
+def test_take_first_fades_non_ev_tennis_short() -> None:
+    prev = make_book(o1=((62.0, 5),), o2=((37.0, 40),), version="1")
+    curr = make_book(o1=((62.0, 1), (68.0, 6)), o2=((37.0, 40),), version="2")
+    signals = evaluate(
+        _tennis_short_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(join_tob_lag=False, follow_style="take_first"),
+        OddsLadder(125),
+    )
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].side is Side.OUTCOME_TWO
+    assert signals[0].style == "tennis_dog"
+
+
 def test_tob_lag_join_takes_soccer_shorts() -> None:
     prev = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="1")
     curr = make_book(o1=((65.0, 1), (70.0, 20)), o2=((34.0, 10),), version="2")

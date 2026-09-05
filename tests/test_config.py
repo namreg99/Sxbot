@@ -2,13 +2,13 @@ from sxbot.config import Settings
 import os
 
 
-def test_load_enables_tob_lag_joins_by_default(monkeypatch) -> None:
+def test_load_disables_tob_lag_joins_by_default(monkeypatch) -> None:
     monkeypatch.delenv("SX_JOIN_TOB_LAG", raising=False)
     monkeypatch.delenv("SX_TOB_LAG_MAX_DECIMAL", raising=False)
     # Ignore a local .env so this asserts the product default, not a laptop file.
     monkeypatch.setattr("sxbot.config.load_dotenv", lambda *a, **k: None)
     settings = Settings.load()
-    assert settings.join_tob_lag is True
+    assert settings.join_tob_lag is False
     assert settings.tob_lag_max_decimal == 2.20
 
 
@@ -39,6 +39,7 @@ def test_live_run_keeps_tennis_dog_unique() -> None:
     assert live.enable_take_stale is True
     assert "tennis_dog" not in live.skip_styles
     assert live.skip_styles == ("mlb",)
+    assert live.join_tob_lag is False
 
 
 def test_load_dry_run_strips_null_bytes(monkeypatch) -> None:

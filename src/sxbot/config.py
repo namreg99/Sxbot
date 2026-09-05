@@ -178,10 +178,10 @@ class Settings:
             mimic_log=os.getenv("SX_MIMIC_LOG", "sxbot-mimic.jsonl"),
             skip_totals=_bool("SX_SKIP_TOTALS", True),
             skip_not_tie=_bool("SX_SKIP_NOT_TIE", True),
-            # Product default on: parked-depth joins on shorts/pick'em. Tests
-            # that construct Settings() keep the dataclass False unless they
-            # pass join_tob_lag=True.
-            join_tob_lag=_bool("SX_JOIN_TOB_LAG", True),
+            # Product default off: tob_lag on priced shorts was −1% unique;
+            # non-EV shorts −32%. Tests that construct Settings() stay False
+            # unless they pass join_tob_lag=True.
+            join_tob_lag=_bool("SX_JOIN_TOB_LAG", False),
             tob_lag_max_decimal=float(os.getenv("SX_TOB_LAG_MAX_DECIMAL", "2.20")),
             one_side_per_market=_bool("SX_ONE_SIDE_PER_MARKET", True),
             one_side_per_event=_bool("SX_ONE_SIDE_PER_EVENT", True),

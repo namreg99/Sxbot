@@ -8,6 +8,7 @@ from sxbot.filters import (
     quote_family,
     quote_style,
     soccer_team_lock_token,
+    soccer_team_lock_token_from_row,
 )
 from sxbot.models import Side
 from sxbot.units import from_percent
@@ -175,8 +176,6 @@ def test_soccer_team_lock_treats_not_team_as_the_same_team() -> None:
 
 
 def test_soccer_dog_row_still_locks_the_team() -> None:
-    from sxbot.filters import soccer_team_lock_token_from_row
-
     token = soccer_team_lock_token_from_row(
         {
             "style": "soccer_dog",
