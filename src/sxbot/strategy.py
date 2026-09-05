@@ -4,9 +4,10 @@ SX_FOLLOW_STYLE:
 - join       — rest behind makers who have size on that side (not steam alone).
 - take       — hit the informed side now (pay the spread, same team as the steam).
 - mixed      — take on strong steam/rotation; otherwise join.
-- take_first — hit the other side to get the same team, only when makers
-               have size on that side and the ask is close to the touch.
-               Pregame uniques are confirmed, not faded against.
+- take_first — hit the other side to get the same team when the ask is
+               close to the touch. MLB pick'em follows steam even without
+               parked size. Tennis shorts are paper-only (live does not
+               pay that spread). Pregame uniques are confirmed, not faded.
 
 The follow-bot (`sxbot run`) uses maker bias to bet *with* the makers.
 Filling the heavy quotes (the other team) is not this strategy.
@@ -20,6 +21,8 @@ from dataclasses import replace
 from sxbot.config import Settings
 from sxbot.filters import (
     STEAM_DOG_STYLES,
+    STYLE_MLB,
+    STYLE_TENNIS_SHORT,
     longshot_skip_reason,
     order_skip_reason,
     quote_style,
@@ -31,7 +34,8 @@ from sxbot.units import ODDS_SCALE, OddsLadder, bps_of_odds, decimal_odds, taker
 
 # Same cutoff as the board "best priced" card. A short in this band with no
 # maker size was the not-EV unique book; we fade to the in-band side that
-# actually has size (every sport). Steam without inventory is skipped.
+# actually has size (every sport). Tennis/soccer/dog steam without inventory
+# is skipped; MLB pick'em steam is not.
 _PRICED_SHORT_MAX = 1.80
 _FADE_REASON = "fade non-EV short"
 _THESIS_REASON = "pregame unique agrees"
@@ -148,6 +152,30 @@ def _maker_lean(view: BookView, side: Side, settings: Settings) -> bool:
     return _size_on_side(view.imbalance, side, float(settings.min_imbalance or 0.15))
 
 
+def _maker_lean_required(style: str | None) -> bool:
+    """MLB pick'em steam was +EV without inventory; tennis/soccer/dogs were not."""
+    return style != STYLE_MLB
+
+
+def _live_take_style_ok(style: str | None) -> bool:
+    """tennis_short unique is high win% but -ROI; do not pay the spread live."""
+    return style != STYLE_TENNIS_SHORT
+
+
+def _side_quote_style(
+    market: Market,
+    view: BookView,
+    side: Side,
+    settings: Settings,
+    fallback: int = 0,
+) -> str | None:
+    touch = view.best(side) or fallback
+    style = quote_style(market, touch, settings) if touch else None
+    if not style and fallback and fallback != touch:
+        style = quote_style(market, fallback, settings)
+    return style
+
+
 def _take_through_too_wide(touch: int | None, take_price: int, max_bps: int) -> bool:
     """Skip takes that pay a junk-wide spread vs the unique-follow touch."""
     if not touch or take_price <= 0 or max_bps <= 0:
@@ -163,11 +191,14 @@ def _take_first_quality_ok(
     view: BookView,
     take_price: int,
     settings: Settings,
+    style: str | None,
 ) -> bool:
-    """take_first: makers lean the side, and the ask is close to the touch."""
+    """take_first: skip tennis shorts; lean required except MLB pick'em; ask near touch."""
     if report.side is None:
         return False
-    if not _maker_lean(view, report.side, settings):
+    if not _live_take_style_ok(style):
+        return False
+    if _maker_lean_required(style) and not _maker_lean(view, report.side, settings):
         return False
     cap = int(getattr(settings, "max_take_through_bps", 250) or 0)
     return not _take_through_too_wide(view.best(report.side), take_price, cap)
@@ -256,8 +287,10 @@ def evaluate(
         return []
     report = aligned
 
+    follow_price = curr.best(report.side) if report.side is not None else None
+    style = quote_style(market, follow_price, settings) if follow_price else None
     if report.motive in {Motive.MAKER_STEAM, Motive.SIZE_ROTATION, Motive.TOB_LAG}:
-        if not _maker_lean(curr, report.side, settings):
+        if _maker_lean_required(style) and not _maker_lean(curr, report.side, settings):
             return []
 
     if report.motive is Motive.CROSSED and settings.enable_take_stale:
@@ -288,8 +321,9 @@ def evaluate(
                     take_price, settings, quote_style(market, take_price, settings)
                 )
             )
+            take_style = style or quote_style(market, take_price, settings)
             if not skip_tob_dog and _take_first_quality_ok(
-                report, curr, take_price, settings
+                report, curr, take_price, settings, take_style
             ):
                 signal = _priced(
                     market,

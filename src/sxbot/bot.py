@@ -14,7 +14,7 @@ from sxbot.api import SxClient
 from sxbot.config import Settings
 from sxbot.executor import Executor
 from sxbot.fills import order_ids
-from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, longshot_skip_reason, quote_family, quote_style
+from sxbot.filters import STYLE_TENNIS_DOG, kickoff_skip_reason, longshot_skip_reason, quote_family
 from sxbot.flow import FlowReport, Motive, SteamTracker, classify, steam_direction
 from sxbot.kelly import TAKE_ACTIONS
 from sxbot.journal import load_follow_live, load_follow_paper
@@ -23,7 +23,15 @@ from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
 from sxbot.risk import RiskGate
 from sxbot.rollout import uses_v2_books
-from sxbot.strategy import _maker_lean, _take_against, _take_through_too_wide, evaluate
+from sxbot.strategy import (
+    _live_take_style_ok,
+    _maker_lean,
+    _maker_lean_required,
+    _side_quote_style,
+    _take_against,
+    _take_through_too_wide,
+    evaluate,
+)
 from sxbot.units import ODDS_SCALE, OddsLadder, to_percent, to_usdc
 from sxbot.v2 import books_from_v2_orders, public_trades_from_v2
 from sxbot.wallets import labeled_addresses
@@ -259,21 +267,26 @@ class Bot:
         side = self.risk.needs_live_entry(market.market_hash)
         if side is None:
             return 0
-        if not _maker_lean(view, side, self.settings):
+        price = _take_against(view, side)
+        if price is None or longshot_skip_reason(price, self.settings):
+            log.info("unique chose %s %s but nothing to take yet", market.label, side.value)
+            return 0
+        style = _side_quote_style(market, view, side, self.settings, price)
+        if not style:
+            return 0
+        if not _live_take_style_ok(style):
+            log.info(
+                "unique %s %s — tennis_short not taken live",
+                market.label,
+                side.value,
+            )
+            return 0
+        if _maker_lean_required(style) and not _maker_lean(view, side, self.settings):
             log.info(
                 "unique %s %s — makers no longer lean this side, holding thesis",
                 market.label,
                 side.value,
             )
-            return 0
-        price = _take_against(view, side)
-        if price is None or longshot_skip_reason(price, self.settings):
-            log.info("unique chose %s %s but nothing to take yet", market.label, side.value)
-            return 0
-        style = quote_style(market, view.best(side) or price, self.settings) or quote_style(
-            market, price, self.settings
-        )
-        if not style:
             return 0
         fair = 0
         if view.mid_one is not None:
@@ -307,7 +320,7 @@ class Bot:
         return self._place_unique(signal)
 
     def _ensure_thesis_live(self, market: Market, view: BookView) -> int:
-        """Paper/pregame unique: take live only while makers still lean that side."""
+        """Paper/pregame unique: take live if the current book still agrees."""
         if self.settings.dry_run:
             return 0
         if self.risk.chosen_side(market.market_hash):
@@ -315,10 +328,13 @@ class Bot:
         side = self.risk.thesis_for(market.market_hash)
         if side is None:
             return 0
-        if not _maker_lean(view, side, self.settings):
-            return 0
         price = _take_against(view, side)
         if price is None or longshot_skip_reason(price, self.settings):
+            return 0
+        style = _side_quote_style(market, view, side, self.settings, price)
+        if not style or not _live_take_style_ok(style):
+            return 0
+        if _maker_lean_required(style) and not _maker_lean(view, side, self.settings):
             return 0
         cap = int(getattr(self.settings, "max_take_through_bps", 250) or 0)
         if _take_through_too_wide(view.best(side), price, cap):
@@ -328,11 +344,6 @@ class Bot:
                 side.value,
             )
             return 0
-        style = quote_style(market, view.best(side) or price, self.settings) or quote_style(
-            market, price, self.settings
-        )
-        if not style:
-            return 0
         fair = 0
         if view.mid_one is not None:
             fair = view.mid_one if side is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
@@ -341,7 +352,7 @@ class Bot:
             side=side,
             action=Action.TAKE_FLOW,
             maker_odds=price,
-            reason="pregame unique — makers still lean this side",
+            reason="pregame unique — book still agrees",
             mid_move_bps=0,
             imbalance=view.imbalance,
             confidence=1.0,

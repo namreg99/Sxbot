@@ -1,12 +1,14 @@
-"""Filter-backtest the unique tape under the size-not-steam model.
+"""Filter-backtest the unique tape under the live take_first model.
 
 SX does not keep old order books, so this is not a rewind. It takes the
 unique follows we already logged (imbalance, motive, side) and asks: would
-the current model still take this ticket? Keep = maker size on our side,
-stale leftover, or a fade onto the in-band dog. Skip = steam/tob_lag with
-no inventory.
+live take_first still take this ticket?
 
-That is the same split as the board EV vs not-EV cards, plus fades.
+Keep = MLB pick'em steam (size optional), soccer/dogs with maker size,
+stale leftover, or a fade onto the in-band dog.
+Skip = tennis shorts (even with size — live does not pay that spread),
+and steam/tob_lag with no inventory except MLB pick'em.
+
 The faded *other* side is not reconstructed — we only know the ticket we
 wrote. Old thin shorts are counted as skips, not as hypothetical dog takes.
 """
@@ -17,18 +19,27 @@ from collections import defaultdict
 from typing import Any
 
 from sxbot.board import is_maker_ev, paper_record
+from sxbot.filters import STYLE_MLB, STYLE_TENNIS_SHORT
 
 _FADE = "fade non-EV short"
+_STEAM_MOTIVES = {"maker_steam", "size_rotation"}
 
 
 def model_keep_reason(row: dict[str, Any], *, min_imbalance: float = 0.15) -> str | None:
-    """Why the size-not-steam model would still take this unique, or None."""
+    """Why live take_first would still take this unique, or None."""
     reason = str(row.get("reason") or "")
     if _FADE in reason:
         return "fade to size"
     motive = str(row.get("motive") or "")
     if motive == "take_stale":
         return "stale leftover"
+    style = str(row.get("style") or "")
+    if style == STYLE_TENNIS_SHORT:
+        return None
+    if style == STYLE_MLB and motive in _STEAM_MOTIVES:
+        return "mlb steam"
+    if motive == "tob_lag":
+        return None
     if is_maker_ev(row, min_imbalance=min_imbalance):
         return "maker size"
     return None
@@ -71,9 +82,11 @@ def format_replay(
 ) -> str:
     lines = [
         "This is NOT a rewind of old SX books (they do not exist).",
-        "It splits the unique follow tape you already logged: keep = maker size",
-        "on our side / stale leftover / fade-to-size. Skip = steam or tob_lag",
-        "with no inventory. Faded dogs we never wrote are not reconstructed.",
+        "It splits the unique follow tape you already logged under the live",
+        "take_first model: keep = MLB pick'em steam (size optional), soccer/",
+        "dogs with maker size, stale leftover, fade-to-size. Skip = tennis",
+        "shorts (even with size) and steam/tob_lag with no inventory except MLB.",
+        "Faded dogs we never wrote are not reconstructed.",
         "",
         _line("all unique", paper_record(all_views)),
         _line("keep model", paper_record(keep)),

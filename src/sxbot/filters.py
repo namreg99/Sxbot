@@ -28,6 +28,8 @@ NFL_LEAGUE_ID = 243
 # Tennis set handicaps / totals / games — not the match moneyline.
 TENNIS_NON_ML_TYPES = {3, 166, 201, 236, 342, 866} | TOTAL_TYPES
 
+STYLE_MLB = "mlb"
+STYLE_TENNIS_SHORT = "tennis_short"
 STYLE_TENNIS_DOG = "tennis_dog"
 STYLE_SOCCER_DOG = "soccer_dog"
 STYLE_MLB_DOG = "mlb_dog"

@@ -97,12 +97,72 @@ def test_take_first_takes_steam_instead_of_joining() -> None:
     assert signals[0].maker_odds == from_percent(54.0)
 
 
-def test_take_first_skips_steam_without_maker_size() -> None:
-    """Steam with no inventory is skipped on join and take — every sport."""
+def test_take_first_skips_soccer_steam_without_maker_size() -> None:
+    """Soccer fav steam with no inventory stays skipped on join and take."""
+    prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
+    curr = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="2")
+    market = _soccer_fav_market()
+    assert (
+        evaluate(
+            market,
+            analyze(prev),
+            analyze(curr),
+            make_settings(follow_style="take_first"),
+            OddsLadder(125),
+        )
+        == []
+    )
+    assert (
+        evaluate(
+            market,
+            analyze(prev),
+            analyze(curr),
+            make_settings(follow_style="join"),
+            OddsLadder(125),
+        )
+        == []
+    )
+
+
+def test_take_first_skips_tennis_steam_without_maker_size() -> None:
+    prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
+    curr = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="2")
+    assert (
+        evaluate(
+            _tennis_short_market(),
+            analyze(prev),
+            analyze(curr),
+            make_settings(follow_style="take_first"),
+            OddsLadder(125),
+        )
+        == []
+    )
+
+
+def test_mlb_steam_without_maker_size_still_follows() -> None:
+    """Pick'em steam without inventory was the +EV MLB skip bucket."""
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
-    assert _signals(prev, curr, follow_style="take_first") == []
-    assert _signals(prev, curr, follow_style="join") == []
+    take = evaluate(
+        _mlb_ml_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="take_first"),
+        OddsLadder(125),
+    )
+    join = evaluate(
+        _mlb_ml_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="join"),
+        OddsLadder(125),
+    )
+    assert len(take) == 1
+    assert take[0].action is Action.TAKE_FLOW
+    assert take[0].style == "mlb"
+    assert len(join) == 1
+    assert join[0].action is Action.JOIN_MAKER
+    assert join[0].style == "mlb"
 
 
 def test_take_first_skips_wide_ask() -> None:
@@ -110,14 +170,14 @@ def test_take_first_skips_wide_ask() -> None:
     prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
     curr = make_book(o1=((65.0, 30),), o2=((28.0, 5),), version="2")
     tight = evaluate(
-        _tennis_short_market(),
+        _soccer_fav_market(),
         analyze(prev),
         analyze(curr),
         make_settings(follow_style="take_first"),
         OddsLadder(125),
     )
     loose = evaluate(
-        _tennis_short_market(),
+        _soccer_fav_market(),
         analyze(prev),
         analyze(curr),
         make_settings(follow_style="take_first", max_take_through_bps=2500),
@@ -134,8 +194,8 @@ def test_take_first_does_not_join_when_take_is_off() -> None:
     assert _signals(prev, curr, follow_style="take_first", enable_take_stale=False) == []
 
 
-def test_take_first_keeps_tennis_short_when_take_pays_inside_1_12() -> None:
-    """Eala @ 1.13 is unique tennis_short. Hitting the dog can be 1.11 — still take."""
+def test_take_first_skips_tennis_short_even_when_ask_is_tight() -> None:
+    """Eala @ 1.13 is unique tennis_short. Live does not pay that spread (replay −ROI)."""
     prev = make_book(o1=((85.0, 10),), o2=((14.0, 10),), version="1")
     curr = make_book(o1=((88.5, 30),), o2=((10.0, 5),), version="2")
     market = make_market(
@@ -156,10 +216,22 @@ def test_take_first_keeps_tennis_short_when_take_pays_inside_1_12() -> None:
         make_settings(follow_style="take_first"),
         OddsLadder(125),
     )
+    assert signals == []
+
+
+def test_paper_join_still_takes_tennis_short_with_size() -> None:
+    prev = make_book(o1=((85.0, 10),), o2=((14.0, 10),), version="1")
+    curr = make_book(o1=((88.5, 30),), o2=((10.0, 5),), version="2")
+    signals = evaluate(
+        _tennis_short_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="join"),
+        OddsLadder(125),
+    )
     assert len(signals) == 1
-    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].action is Action.JOIN_MAKER
     assert signals[0].style == "tennis_short"
-    assert signals[0].side is Side.OUTCOME_ONE
 
 
 def test_mixed_style_skips_tob_lag_unless_enabled() -> None:
@@ -485,6 +557,20 @@ def test_soccer_pickem_is_not_quoted() -> None:
         OddsLadder(125),
     )
     assert signals == []
+
+
+def _soccer_fav_market(**overrides):
+    data = dict(
+        type=1,
+        sport_id=5,
+        sport_label="Soccer",
+        league_id=1,
+        league_label="EPL",
+        outcome_one="Arsenal",
+        outcome_two="Not Arsenal",
+    )
+    data.update(overrides)
+    return make_market(**data)
 
 
 def _soccer_dog_market(**overrides):

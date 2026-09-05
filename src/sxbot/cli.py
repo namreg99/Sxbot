@@ -29,7 +29,8 @@ def apply_live_run(settings: Settings) -> Settings:
     Older live smokes set SX_SKIP_STYLES=tennis_dog. Unique follow still
     extracts that band (paper tennis_dog is green). --live turns the skip off.
 
-    Live also refuses steam with no maker size (the priced-not-EV slice).
+    Live also refuses tennis_short takes (that book is −ROI even with size)
+    and follows MLB pick'em steam without requiring parked maker size.
     Pregame paper uniques are a thesis to confirm, not a live fill.
     """
     keep = tuple(
@@ -101,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub.add_parser(
         "replay",
-        help="Filter-backtest unique follow: keep maker-size tickets, drop steam-without-size",
+        help="Filter-backtest unique follow under the live take_first keep/skip split",
     )
     sub.add_parser(
         "sharp",
@@ -460,7 +461,7 @@ def _print_grade(client: SxClient, path: str, *, title: str) -> None:
 
 
 def cmd_replay(client: SxClient, settings: Settings) -> int:
-    """Grade unique follow under the size-not-steam keep/skip split."""
+    """Grade unique follow under the live take_first keep/skip split."""
     from sxbot.board import _paper_view, unique_lifetime_rows
     from sxbot.grade import grade_row
     from sxbot.journal import load_follow_live, load_follow_paper

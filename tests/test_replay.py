@@ -14,14 +14,39 @@ def test_keeps_maker_size_and_stale_and_fade() -> None:
     )
 
 
-def test_skips_steam_and_tob_lag_without_size() -> None:
-    assert model_keep_reason({"motive": "maker_steam", "side": "outcome_one", "imbalance": 0}) is None
+def test_keeps_mlb_steam_without_size() -> None:
+    assert model_keep_reason(
+        {"style": "mlb", "motive": "maker_steam", "side": "outcome_one", "imbalance": 0}
+    ) == "mlb steam"
+
+
+def test_skips_tennis_short_even_with_size() -> None:
+    assert (
+        model_keep_reason(
+            {
+                "style": "tennis_short",
+                "motive": "maker_steam",
+                "side": "outcome_one",
+                "imbalance": 0.4,
+            }
+        )
+        is None
+    )
+
+
+def test_skips_soccer_steam_and_tob_lag_without_size() -> None:
+    assert (
+        model_keep_reason(
+            {"style": "soccer", "motive": "maker_steam", "side": "outcome_one", "imbalance": 0}
+        )
+        is None
+    )
     assert model_keep_reason({"motive": "tob_lag", "side": "outcome_one", "imbalance": -0.4}) is None
 
 
 def test_split_and_format_replay() -> None:
     keep_row = {
-        "style": "tennis_short",
+        "style": "soccer",
         "motive": "maker_steam",
         "side": "outcome_one",
         "imbalance": 0.4,
@@ -31,9 +56,9 @@ def test_split_and_format_replay() -> None:
     }
     skip_row = {
         "style": "tennis_short",
-        "motive": "tob_lag",
+        "motive": "maker_steam",
         "side": "outcome_one",
-        "imbalance": 0,
+        "imbalance": 0.4,
         "result": "lose",
         "stake_usdc": 5,
         "pnl_usdc": -5,
@@ -44,5 +69,7 @@ def test_split_and_format_replay() -> None:
     text = format_replay([keep_row, skip_row], keep, skip)
     assert "keep model" in text
     assert "skip" in text
+    assert "soccer" in text
     assert "tennis_short" in text
     assert "NOT a rewind" in text
+    assert "MLB pick" in text
