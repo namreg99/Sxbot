@@ -1,12 +1,12 @@
 """Turn classified flow into join (maker) and/or take (taker) actions.
 
 SX_FOLLOW_STYLE:
-- join       — rest behind makers (default). Still take leftover crossed quotes.
+- join       — rest behind makers who have size on that side (not steam alone).
 - take       — hit the informed side now (pay the spread, same team as the steam).
 - mixed      — take on strong steam/rotation; otherwise join.
 - take_first — hit the other side to get the same team, only when makers
                have size on that side and the ask is close to the touch.
-               Do not sit as a maker.
+               Pregame uniques are confirmed, not faded against.
 
 The follow-bot (`sxbot run`) uses maker bias to bet *with* the makers.
 Filling the heavy quotes (the other team) is not this strategy.
@@ -20,7 +20,6 @@ from dataclasses import replace
 from sxbot.config import Settings
 from sxbot.filters import (
     STEAM_DOG_STYLES,
-    is_tennis,
     longshot_skip_reason,
     order_skip_reason,
     quote_style,
@@ -30,11 +29,12 @@ from sxbot.models import Action, Market, PublicTrade, Signal, Side
 from sxbot.orderbook import BookView
 from sxbot.units import ODDS_SCALE, OddsLadder, bps_of_odds, decimal_odds, taker_odds, to_prob
 
-# Same cutoff as the board "best priced" card. Tennis shorts in this band
-# with no maker size were −44% unique; we fade those to the in-band dog.
-# Soccer parked shorts are skipped instead (sample was tiny and green).
+# Same cutoff as the board "best priced" card. A short in this band with no
+# maker size was the not-EV unique book; we fade to the in-band side that
+# actually has size (every sport). Steam without inventory is skipped.
 _PRICED_SHORT_MAX = 1.80
 _FADE_REASON = "fade non-EV short"
+_THESIS_REASON = "pregame unique agrees"
 
 
 def _join_odds(view: BookView, side: Side, ladder: OddsLadder, ticks_behind: int) -> int | None:
@@ -164,12 +164,7 @@ def _take_first_quality_ok(
     take_price: int,
     settings: Settings,
 ) -> bool:
-    """Live take_first: same team as paper, but only the priced+EV slice.
-
-    Paper join can sit behind a steam with no inventory. Hitting the ask
-    without maker size was the −32% / −44% unique book. Paying more than
-    `max_take_through_bps` vs the touch is a different (worse) bet than paper.
-    """
+    """take_first: makers lean the side, and the ask is close to the touch."""
     if report.side is None:
         return False
     if not _maker_lean(view, report.side, settings):
@@ -184,14 +179,11 @@ def _non_ev_priced_short(
     view: BookView,
     settings: Settings,
 ) -> bool:
-    """Favorite (≤1.80) whose parked-depth side does not have maker size.
+    """Favorite (≤1.80) with no maker size; the other side has size and is in-band.
 
-    Unique tape: tennis shorts were −44%. Opposite side is the fade.
-    Soccer not-EV was a tiny green sample — do not fade it.
+    Follow the inventory, every sport — not steam into a thin short.
     """
     if report.side is None:
-        return False
-    if not is_tennis(market):
         return False
     price = view.best(report.side)
     if not price:
@@ -200,7 +192,24 @@ def _non_ev_priced_short(
         return False
     if decimal_odds(to_prob(price)) > _PRICED_SHORT_MAX + 1e-9:
         return False
-    return not _maker_lean(view, report.side, settings)
+    if _maker_lean(view, report.side, settings):
+        return False
+    other = report.side.opposite()
+    if not _maker_lean(view, other, settings):
+        return False
+    other_price = view.best(other)
+    return bool(other_price) and quote_style(market, other_price, settings) is not None
+
+
+def _apply_thesis(report: FlowReport, thesis_side: Side | None) -> FlowReport | None:
+    """Pregame unique is the thesis. Fade/steam the other way is a skip."""
+    if thesis_side is None or report.side is None:
+        return report
+    if report.side is not thesis_side:
+        return None
+    if _THESIS_REASON in report.reasons:
+        return report
+    return replace(report, reasons=(*report.reasons, _THESIS_REASON))
 
 
 def evaluate(
@@ -212,6 +221,7 @@ def evaluate(
     trades: list[PublicTrade] | None = None,
     steam_hits: int = 0,
     report: FlowReport | None = None,
+    thesis_side: Side | None = None,
 ) -> list[Signal]:
     if order_skip_reason(market, settings):
         return []
@@ -239,6 +249,15 @@ def evaluate(
             )
             faded = True
         elif not settings.join_tob_lag:
+            return []
+
+    aligned = _apply_thesis(report, thesis_side)
+    if aligned is None:
+        return []
+    report = aligned
+
+    if report.motive in {Motive.MAKER_STEAM, Motive.SIZE_ROTATION, Motive.TOB_LAG}:
+        if not _maker_lean(curr, report.side, settings):
             return []
 
     if report.motive is Motive.CROSSED and settings.enable_take_stale:

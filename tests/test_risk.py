@@ -37,7 +37,7 @@ def test_blocks_max_open_markets() -> None:
     gate.record(first)
     assert gate.allow(_signal(hash_="0x2")) == "max open markets"
     opposite = replace(_signal(hash_="0x1"), side=Side.OUTCOME_TWO)
-    assert gate.allow(opposite) == "already in this market"
+    assert gate.allow(opposite) == "against pregame unique"
 
 
 def test_does_not_restack_the_same_join() -> None:
@@ -45,7 +45,7 @@ def test_does_not_restack_the_same_join() -> None:
     gate.record(_signal(hash_="0x1"))
     assert gate.allow(_signal(hash_="0x1")) == "already on this side"
     opposite = replace(_signal(hash_="0x1"), side=Side.OUTCOME_TWO)
-    assert gate.allow(opposite) == "already in this market"
+    assert gate.allow(opposite) == "against pregame unique"
 
 
 def test_does_not_restack_a_take_on_the_same_side() -> None:
@@ -78,7 +78,7 @@ def test_hydrate_live_rested_allows_retry_take() -> None:
     assert gate.needs_live_entry("0x1") is Side.OUTCOME_ONE
     assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x1")) is None
     opposite = replace(_signal(Action.TAKE_FLOW, hash_="0x1"), side=Side.OUTCOME_TWO)
-    assert gate.allow(opposite) == "already in this market"
+    assert gate.allow(opposite) == "against pregame unique"
 
 
 def test_hydrate_live_fill_blocks_restack() -> None:
@@ -104,7 +104,7 @@ def test_hydrate_live_fill_blocks_restack() -> None:
         ]
     )
     assert gate.allow(_signal(hash_="0x1")) == "already on this side"
-    assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x2")) == "already in this market"
+    assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x2")) == "against pregame unique"
     take_two = replace(_signal(Action.TAKE_FLOW, hash_="0x2"), side=Side.OUTCOME_TWO)
     assert gate.allow(take_two) == "already on this side"
     assert gate.exposure.total() == 0
@@ -362,3 +362,27 @@ def test_hydrate_soccer_dog_still_locks_the_not_team() -> None:
         type_=1,
     )
     assert gate.allow(not_win) == "already on this team"
+
+
+def test_paper_thesis_allows_same_side_live_take() -> None:
+    """Pregame paper unique is a thesis, not a live fill — live can confirm it."""
+    gate = RiskGate(make_settings(dry_run=False, max_exposure_usdc=1000, max_per_market_usdc=25))
+    gate.hydrate(
+        [
+            {
+                "action": "join_maker",
+                "market": "0x1",
+                "side": "outcome_one",
+                "style": "mlb",
+                "live_filled": True,
+                "stake": "5000000",
+            }
+        ],
+        thesis_only=True,
+    )
+    assert gate.thesis_for("0x1") is Side.OUTCOME_ONE
+    assert gate.chosen_side("0x1") is None
+    assert gate.allow(_signal(Action.TAKE_FLOW, hash_="0x1")) is None
+    opposite = replace(_signal(Action.TAKE_FLOW, hash_="0x1"), side=Side.OUTCOME_TWO)
+    assert gate.allow(opposite) == "against pregame unique"
+    assert gate.exposure.total() == 0

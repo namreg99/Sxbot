@@ -34,6 +34,8 @@ class RiskGate:
         self.event_markets: dict[str, set[str]] = {}
         self.locked_teams: set[tuple[str, ...]] = set()
         self.market_team_tokens: dict[str, tuple[str, ...]] = {}
+        # Paper/pregame unique we want live to confirm — not a live fill.
+        self.thesis_sides: dict[str, str] = {}
 
     def stake(self) -> int:
         return to_base_units(self.settings.stake_usdc, self.decimals)
@@ -78,13 +80,22 @@ class RiskGate:
         target = to_base_units(float(self.settings.max_per_market_usdc), self.decimals)
         return already > 0 and (target - already) >= self.stake()
 
-    def hydrate(self, rows: list[dict[str, Any]], *, now: int | None = None) -> None:
+    def hydrate(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        now: int | None = None,
+        thesis_only: bool = False,
+    ) -> None:
         """Remember market+side already quoted so a restart does not restack.
 
         Live unique fills restore their matched dollars so a $1 fill can still
         take the extra $3 when Kelly is on. Tennis-dog quotes that are still
         in their live-exit window are restored onto the cap so we keep watching
         after kickoff. Other session caps still reset.
+
+        `thesis_only` loads paper/pregame uniques as a side to confirm, not as
+        live fills. Live can still take that same side when makers lean it.
         """
         now = int(now if now is not None else time.time())
         last: dict[tuple[str, str], dict[str, Any]] = {}
@@ -98,7 +109,7 @@ class RiskGate:
             for (market, _side), row in last.items()
             if str(row.get("action") or "") == Action.CANCEL.value
         }
-        if not self.settings.dry_run:
+        if not thesis_only and not self.settings.dry_run:
             for row in rows:
                 action = str(row.get("action") or "")
                 if action not in {a.value for a in _TRADE_ACTIONS}:
@@ -127,13 +138,22 @@ class RiskGate:
                 continue
             if action not in {a.value for a in _TRADE_ACTIONS}:
                 continue
-            self.chosen_sides.add((market, side))
             try:
                 side_enum = Side(side)
             except ValueError:
                 side_enum = None
             if side_enum is not None:
                 self._add_team_lock(market, soccer_team_lock_token_from_row(row))
+            style = str(row.get("style") or "")
+            if style:
+                self.quoted_style[market] = style
+            event_id = str(row.get("event_id") or "")
+            if event_id:
+                self.event_markets.setdefault(event_id, set()).add(market)
+            if thesis_only:
+                self.thesis_sides[market] = side
+                continue
+            self.chosen_sides.add((market, side))
             filled = bool(self.settings.dry_run) or row_live_filled(row)
             if filled:
                 self.joined_sides.add((market, side))
@@ -145,12 +165,6 @@ class RiskGate:
                 oids = order_ids(row.get("result"))
                 if oids:
                     self.pending_order_ids[market] = oids
-            style = str(row.get("style") or "")
-            if style:
-                self.quoted_style[market] = style
-            event_id = str(row.get("event_id") or "")
-            if event_id:
-                self.event_markets.setdefault(event_id, set()).add(market)
             if style == STYLE_MM:
                 if action == Action.MM_FILL.value:
                     continue
@@ -210,6 +224,13 @@ class RiskGate:
             return "max total exposure"
         if self.exposure.net(market_hash) + amount > max_mkt:
             return "max per-market exposure"
+        thesis = self.thesis_for(market_hash)
+        if (
+            thesis is not None
+            and signal.side is not thesis
+            and (signal.style or "") != STYLE_MM
+        ):
+            return "against pregame unique"
         key = (market_hash, signal.side.value)
         if key in self.joined_sides:
             extra = self.stake_for(signal)
@@ -233,6 +254,7 @@ class RiskGate:
             and token
             and token in self.locked_teams
             and all(item[0] != market_hash for item in self.chosen_sides)
+            and self.thesis_for(market_hash) is not signal.side
         ):
             return "already on this team"
         return None
@@ -246,6 +268,16 @@ class RiskGate:
     def _drop_team_lock(self, market_hash: str) -> None:
         self.market_team_tokens.pop(market_hash, None)
         self.locked_teams = set(self.market_team_tokens.values())
+
+    def thesis_for(self, market_hash: str) -> Side | None:
+        """Pregame/paper unique, or the live side we already picked."""
+        raw = self.thesis_sides.get(market_hash)
+        if raw:
+            try:
+                return Side(raw)
+            except ValueError:
+                pass
+        return self.chosen_side(market_hash)
 
     def chosen_side(self, market_hash: str) -> Side | None:
         for market, side in self.chosen_sides:
@@ -272,6 +304,7 @@ class RiskGate:
     def mark_chosen(self, signal: Signal) -> None:
         market_hash = signal.market.market_hash
         self.chosen_sides.add((market_hash, signal.side.value))
+        self.thesis_sides[market_hash] = signal.side.value
         if signal.style:
             self.quoted_style[market_hash] = signal.style
         event_id = str(signal.market.event_id or "")
@@ -286,6 +319,7 @@ class RiskGate:
             self._drop_slot(market_hash)
             self.joined_sides = {item for item in self.joined_sides if item[0] != market_hash}
             self.chosen_sides = {item for item in self.chosen_sides if item[0] != market_hash}
+            self.thesis_sides.pop(market_hash, None)
             self.pending_order_ids.pop(market_hash, None)
             self.quoted_style.pop(market_hash, None)
             self._drop_team_lock(market_hash)
@@ -307,6 +341,7 @@ class RiskGate:
         if signal.action in _TRADE_ACTIONS:
             self.joined_sides.add((market_hash, signal.side.value))
             self.chosen_sides.add((market_hash, signal.side.value))
+            self.thesis_sides[market_hash] = signal.side.value
             self.pending_order_ids.pop(market_hash, None)
             self._add_team_lock(market_hash, soccer_team_lock_token(signal.market, signal.side))
 

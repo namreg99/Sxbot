@@ -23,7 +23,7 @@ from sxbot.orderbook import BookView, analyze, format_view
 from sxbot.overlap import MarketQuotes, attribute_quotes, attribute_tape, tag_signal
 from sxbot.risk import RiskGate
 from sxbot.rollout import uses_v2_books
-from sxbot.strategy import _take_against, evaluate
+from sxbot.strategy import _maker_lean, _take_against, _take_through_too_wide, evaluate
 from sxbot.units import ODDS_SCALE, OddsLadder, to_percent, to_usdc
 from sxbot.v2 import books_from_v2_orders, public_trades_from_v2
 from sxbot.wallets import labeled_addresses
@@ -53,8 +53,10 @@ class Bot:
         self._pregame_mid: dict[str, tuple[float, int]] = {}
         self._closed: set[str] = self._hydrate_closes()
         paper = load_follow_paper(settings.paper_log)
-        self.risk.hydrate(paper)
-        if not settings.dry_run:
+        if settings.dry_run:
+            self.risk.hydrate(paper)
+        else:
+            self.risk.hydrate(paper, thesis_only=True)
             self.risk.hydrate(load_follow_live(settings.paper_log))
 
     def qualifying_markets(self, limit: int | None = None) -> list[Market]:
@@ -234,8 +236,18 @@ class Bot:
             executed += self._ensure_live_entry(market, view)
             if self.risk.chosen_side(market.market_hash):
                 continue
+            executed += self._ensure_thesis_live(market, view)
+            if self.risk.chosen_side(market.market_hash):
+                continue
+            thesis = self.risk.thesis_for(market.market_hash)
             for signal in evaluate(
-                market, prev, view, self.settings, self.ladder, report=report
+                market,
+                prev,
+                view,
+                self.settings,
+                self.ladder,
+                report=report,
+                thesis_side=thesis,
             ):
                 executed += self._place_unique(signal)
         return executed
@@ -246,6 +258,13 @@ class Bot:
             return 0
         side = self.risk.needs_live_entry(market.market_hash)
         if side is None:
+            return 0
+        if not _maker_lean(view, side, self.settings):
+            log.info(
+                "unique %s %s — makers no longer lean this side, holding thesis",
+                market.label,
+                side.value,
+            )
             return 0
         price = _take_against(view, side)
         if price is None or longshot_skip_reason(price, self.settings):
@@ -283,6 +302,52 @@ class Bot:
             style=style,
             fair_odds=fair,
             motive="kelly_topup" if topping else "retry_unfilled",
+            tracker_odds=view.best(side) or price,
+        )
+        return self._place_unique(signal)
+
+    def _ensure_thesis_live(self, market: Market, view: BookView) -> int:
+        """Paper/pregame unique: take live only while makers still lean that side."""
+        if self.settings.dry_run:
+            return 0
+        if self.risk.chosen_side(market.market_hash):
+            return 0
+        side = self.risk.thesis_for(market.market_hash)
+        if side is None:
+            return 0
+        if not _maker_lean(view, side, self.settings):
+            return 0
+        price = _take_against(view, side)
+        if price is None or longshot_skip_reason(price, self.settings):
+            return 0
+        cap = int(getattr(self.settings, "max_take_through_bps", 250) or 0)
+        if _take_through_too_wide(view.best(side), price, cap):
+            log.info(
+                "pregame unique %s %s — ask too wide vs touch, waiting",
+                market.label,
+                side.value,
+            )
+            return 0
+        style = quote_style(market, view.best(side) or price, self.settings) or quote_style(
+            market, price, self.settings
+        )
+        if not style:
+            return 0
+        fair = 0
+        if view.mid_one is not None:
+            fair = view.mid_one if side is Side.OUTCOME_ONE else ODDS_SCALE - view.mid_one
+        signal = Signal(
+            market=market,
+            side=side,
+            action=Action.TAKE_FLOW,
+            maker_odds=price,
+            reason="pregame unique — makers still lean this side",
+            mid_move_bps=0,
+            imbalance=view.imbalance,
+            confidence=1.0,
+            style=style,
+            fair_odds=fair,
+            motive="pregame_thesis",
             tracker_odds=view.best(side) or price,
         )
         return self._place_unique(signal)

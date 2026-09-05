@@ -22,7 +22,7 @@ def test_unchanged_book_is_silent() -> None:
 
 def test_maker_reprice_joins_outcome_one() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 30),), o2=((46.0, 5),), version="2")
     signals = _signals(prev, curr)
     joins = [s for s in signals if s.action is Action.JOIN_MAKER]
     assert len(joins) == 1
@@ -34,7 +34,7 @@ def test_maker_reprice_joins_outcome_one() -> None:
 
 def test_maker_reprice_joins_outcome_two() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((47.0, 10),), o2=((52.0, 10),), version="2")
+    curr = make_book(o1=((47.0, 5),), o2=((52.0, 30),), version="2")
     signals = _signals(prev, curr)
     joins = [s for s in signals if s.action is Action.JOIN_MAKER]
     assert len(joins) == 1
@@ -77,7 +77,7 @@ def test_one_sided_book_no_signal() -> None:
 
 def test_take_style_hits_steam_instead_of_joining() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
-    curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
+    curr = make_book(o1=((53.0, 30),), o2=((46.0, 5),), version="2")
     signals = _signals(prev, curr, follow_style="take")
     assert len(signals) == 1
     assert signals[0].action is Action.TAKE_FLOW
@@ -98,13 +98,11 @@ def test_take_first_takes_steam_instead_of_joining() -> None:
 
 
 def test_take_first_skips_steam_without_maker_size() -> None:
-    """Balanced steam is a paper join. Hitting the ask was the not-EV live book."""
+    """Steam with no inventory is skipped on join and take — every sport."""
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
     curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="2")
     assert _signals(prev, curr, follow_style="take_first") == []
-    joins = _signals(prev, curr, follow_style="join")
-    assert len(joins) == 1
-    assert joins[0].action is Action.JOIN_MAKER
+    assert _signals(prev, curr, follow_style="join") == []
 
 
 def test_take_first_skips_wide_ask() -> None:
@@ -258,8 +256,8 @@ def test_fades_non_ev_tennis_short_tob_lag() -> None:
     assert "fade non-EV short" in signals[0].reason
 
 
-def test_does_not_fade_non_ev_soccer_short() -> None:
-    """Soccer not-EV sample was tiny and green. Skip parked shorts; do not fade."""
+def test_fades_non_ev_soccer_short() -> None:
+    """Same size-not-steam fade as tennis — soccer dog is in-band."""
     prev = make_book(o1=((62.0, 5),), o2=((37.0, 40),), version="1")
     curr = make_book(o1=((62.0, 1), (68.0, 6)), o2=((37.0, 40),), version="2")
     signals = evaluate(
@@ -269,7 +267,11 @@ def test_does_not_fade_non_ev_soccer_short() -> None:
         make_settings(join_tob_lag=False, follow_style="take_first"),
         OddsLadder(125),
     )
-    assert signals == []
+    assert len(signals) == 1
+    assert signals[0].action is Action.TAKE_FLOW
+    assert signals[0].side is Side.OUTCOME_TWO
+    assert signals[0].style == "soccer_dog"
+    assert "fade non-EV short" in signals[0].reason
 
 
 def test_take_first_fades_non_ev_tennis_short() -> None:
@@ -416,7 +418,7 @@ def test_skips_futures_kickoff() -> None:
 
 def test_tennis_dog_joins_in_band() -> None:
     prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
-    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    curr = make_book(o1=((32.0, 30),), o2=((67.0, 5),), version="2")
     market = make_market(
         type=3,
         sport_id=6,
@@ -513,7 +515,7 @@ def _mlb_ml_market():
 
 def test_soccer_dog_joins_on_steam() -> None:
     prev = make_book(o1=((30.0, 10),), o2=((69.0, 10),), version="1")
-    curr = make_book(o1=((32.0, 10),), o2=((67.0, 10),), version="2")
+    curr = make_book(o1=((32.0, 30),), o2=((67.0, 5),), version="2")
     signals = evaluate(
         _soccer_dog_market(),
         analyze(prev),
@@ -582,7 +584,7 @@ def test_tob_lag_skips_soccer_and_mlb_dogs() -> None:
 
 def test_soccer_type1_joins_favorite_band() -> None:
     prev = make_book(o1=((62.0, 10),), o2=((37.0, 10),), version="1")
-    curr = make_book(o1=((65.0, 10),), o2=((34.0, 10),), version="2")
+    curr = make_book(o1=((65.0, 30),), o2=((34.0, 5),), version="2")
     market = make_market(
         type=1,
         sport_id=5,
@@ -607,3 +609,55 @@ def test_older_version_is_ignored() -> None:
     prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="9")
     curr = make_book(o1=((53.0, 10),), o2=((46.0, 10),), version="8")
     assert _signals(prev, curr) == []
+
+
+def test_thesis_blocks_fade_against_pregame_unique() -> None:
+    prev = make_book(o1=((62.0, 5),), o2=((37.0, 40),), version="1")
+    curr = make_book(o1=((62.0, 1), (68.0, 6)), o2=((37.0, 40),), version="2")
+    faded = evaluate(
+        _tennis_short_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(join_tob_lag=False),
+        OddsLadder(125),
+        thesis_side=Side.OUTCOME_ONE,
+    )
+    confirmed = evaluate(
+        _tennis_short_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(join_tob_lag=False),
+        OddsLadder(125),
+        thesis_side=Side.OUTCOME_TWO,
+    )
+    assert faded == []
+    assert len(confirmed) == 1
+    assert confirmed[0].side is Side.OUTCOME_TWO
+    assert "pregame unique agrees" in confirmed[0].reason
+
+
+def test_thesis_confirms_steam_with_size() -> None:
+    prev = make_book(o1=((50.0, 10),), o2=((49.0, 10),), version="1")
+    curr = make_book(o1=((53.0, 30),), o2=((46.0, 5),), version="2")
+    against = _signals(prev, curr, follow_style="take_first")
+    # helper doesn't pass thesis; call evaluate
+    signals = evaluate(
+        make_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="take_first"),
+        OddsLadder(125),
+        thesis_side=Side.OUTCOME_ONE,
+    )
+    skip = evaluate(
+        make_market(),
+        analyze(prev),
+        analyze(curr),
+        make_settings(follow_style="take_first"),
+        OddsLadder(125),
+        thesis_side=Side.OUTCOME_TWO,
+    )
+    assert against and against[0].side is Side.OUTCOME_ONE
+    assert len(signals) == 1
+    assert "pregame unique agrees" in signals[0].reason
+    assert skip == []
